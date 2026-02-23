@@ -1,6 +1,6 @@
 {
   "name": "objectivist-lattice",
-  "version": "1.0.0",
+  "version": "0.0.0",
   "description": "Objectivist Knowledge Lattice CLI — enforces percept > axiom > principle > application hierarchy on filesystem. Designed for LLM agents and rational humans.",
   "type": "module",
   "bin": {
