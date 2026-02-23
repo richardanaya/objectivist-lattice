@@ -90,8 +90,34 @@ WHY THIS MATTERS FOR AN AI AGENT:
   - "lattice query chain <belief>" shows the full proof back to observation
   - "lattice validate" catches beliefs with broken or missing proofs
   - "lattice query tentative" surfaces everything not yet grounded
+  - "lattice query related <topic>" retrieves epistemically connected knowledge
+    without requiring perfect tagging — the graph structure is the index
   An agent using this tool can answer "why do you believe X?" with a
   traceable chain instead of "because it seemed right."
+
+MEMORY RETRIEVAL (for agents in active conversations):
+  When a topic arises, do not search for exact tag matches. Walk the graph.
+
+  The entry point can be a slug, a tag, or a title keyword — whichever gets
+  you into the graph fastest. From there, the bidirectional walk expands
+  outward: down to foundations, up to dependents, and from every intermediate
+  node in both directions. This surfaces sibling knowledge — nodes that share
+  the same foundations as your entry point but have no direct link to it.
+
+  $ lattice query related <topic> --json
+  # Each result includes:
+  #   relationship: ancestor | dependent | sibling
+  #   path: intermediate nodes explaining WHY it was surfaced
+  #   score: proximity + validation + actionability
+
+  "ancestor"  — this is in the foundation of your topic (go deeper with chain)
+  "dependent" — this is built on top of your topic (direct consequence)
+  "sibling"   — shares a common foundation, different domain (often the most
+                surprising and valuable result — knowledge you wouldn't have
+                tagged the same way but that directly applies)
+
+  For any surfaced node that looks relevant, verify it is grounded:
+  $ lattice query chain <slug> --json
 
 WHEN TO ADD A NODE (the agent's decision filter):
   Before running "lattice add", ask yourself:
@@ -146,6 +172,7 @@ COMMANDS:
                tentative     — Ungrounded nodes needing review
                tag           — All nodes on a topic, grouped by level
                hollow-chains — Validated nodes whose chain contains a Tentative ancestor
+               related       — Multi-hop graph walk to find related knowledge
   validate   Integrity scan. Catches broken chains, cycles, rogue tags.
   delete     Remove a node. Only Tentative or zero-incoming-links.
   tags       Manage the master tag list (list / add / remove).
@@ -154,19 +181,22 @@ AGENT WORKFLOW (recommended daily cycle):
   1. lattice validate                    — Check vault health first
   2. lattice query tentative             — Review ungrounded beliefs
   3. For each tentative: ground it (add parents, promote) or delete it
-  4. When you observe something new:
+  4. When a topic arises in conversation:
+     lattice query related <topic>       — Retrieve connected knowledge
+     lattice query chain <slug>          — Verify any surfaced node is grounded
+  5. When you observe something new:
      lattice add --level percept ...     — Record the observation (auto-validated)
-  5. When you identify a self-evident truth:
+  6. When you identify a self-evident truth:
      lattice add --level axiom ...       — Record the axiom (auto-validated)
-  6. When you identify a pattern:
+  7. When you identify a pattern:
      lattice add --level principle ...   — Induce the rule, link to bedrock
      lattice update <principle> --status "Integrated/Validated"  — promote when ready
-  7. When you decide on an action:
+  8. When you decide on an action:
      lattice add --level application ... — Deduce the action, link to principle
      lattice update <application> --status "Integrated/Validated"  — promote when ready
-  8. Before any significant decision:
+  9. Before any significant decision:
      lattice query chain <decision>      — Verify the proof chain holds
-  9. lattice validate                    — Confirm nothing is broken
+  10. lattice validate                   — Confirm nothing is broken
 
 PURGE AGENT WORKFLOW (weekly cron job):
   A separate agent whose only job is epistemic hygiene — surface weak nodes,

@@ -244,6 +244,198 @@ export function buildIncomingLinks(
   return incoming;
 }
 
+// ─── Related node discovery ──────────────────────────────────────────
+
+/** A node with a relevance score, returned by findRelatedNodes. */
+export interface RelatedNode {
+  slug: string;
+  title: string;
+  level: string;
+  status: string;
+  tags: string[];
+  score: number;
+  /** How many entry-point seeds could reach this node. */
+  reach_count: number;
+  /** Minimum hops from any entry-point seed. */
+  min_distance: number;
+  /**
+   * How this node relates to the entry point(s):
+   *   ancestor  — reached by going purely down (it's in your foundation)
+   *   dependent — reached by going purely up (it's built on your entry point)
+   *   sibling   — path went down then up at some point (shares a common ancestor)
+   * Multiple types possible if reachable via different path shapes.
+   */
+  relationship: Array<"ancestor" | "dependent" | "sibling">;
+  /**
+   * Intermediate nodes on the shortest path from seed to this node.
+   * Empty if distance=1 (direct connection).
+   * Each entry is { slug, title, level } — no lookup required.
+   */
+  path: Array<{ slug: string; title: string; level: string }>;
+}
+
+/**
+ * Multi-hop graph walk from one or more entry-point seeds.
+ * Walks both directions simultaneously:
+ *   - down: follows reduces_to toward bedrock
+ *   - up:   follows incoming links toward dependents
+ *
+ * Scores each discovered node by:
+ *   reach_count × 2.0   — nodes reachable from multiple seeds are connective tissue
+ *   1.0 / min_distance  — closer neighbours score higher
+ *   +0.5 if validated   — prefer grounded knowledge
+ *   +0.3 if application — most actionable level
+ *   +0.2 if principle   — second most actionable
+ *
+ * Entry-point seeds are excluded from results.
+ * Returns nodes sorted descending by score, sliced to limit.
+ */
+/** Internal queue item carrying full traversal state. */
+interface WalkItem {
+  slug: string;
+  depth: number;
+  /** Has the path from seed to this item traversed any reduces_to edge? */
+  hasGoneDown: boolean;
+  /** Has the path from seed to this item traversed any incoming-link edge? */
+  hasGoneUp: boolean;
+  /**
+   * Intermediate slugs between the seed and this item, exclusive of both.
+   * Empty when depth=1 (directly adjacent to seed).
+   */
+  pathSlugs: string[];
+}
+
+export function findRelatedNodes(
+  entryPointSlugs: string[],
+  nodes: Map<string, LatticeNode>,
+  incomingLinks: Map<string, string[]>,
+  maxDepth = 3,
+  limit = 5,
+): RelatedNode[] {
+  const entrySet = new Set(entryPointSlugs);
+
+  // Per-node tracking across all seeds
+  const reachCount = new Map<string, number>();
+  const minDistance = new Map<string, number>();
+  // Accumulated across all pushes (before first visit cuts off further pushes)
+  const relTypes = new Map<string, Set<"ancestor" | "dependent" | "sibling">>();
+  // Stored on first push — BFS guarantees this is the shortest path
+  const shortestPathSlugs = new Map<string, string[]>();
+
+  for (const seed of entryPointSlugs) {
+    const visited = new Set<string>();
+    const queue: WalkItem[] = [{
+      slug: seed,
+      depth: 0,
+      hasGoneDown: false,
+      hasGoneUp: false,
+      pathSlugs: [],
+    }];
+
+    while (queue.length > 0) {
+      const item = queue.shift()!;
+      if (visited.has(item.slug)) continue;
+      visited.add(item.slug);
+
+      // Record this node as discovered (skip entry points themselves)
+      if (!entrySet.has(item.slug)) {
+        reachCount.set(item.slug, (reachCount.get(item.slug) ?? 0) + 1);
+        const prev = minDistance.get(item.slug) ?? Infinity;
+        minDistance.set(item.slug, Math.min(prev, item.depth));
+      }
+
+      if (item.depth >= maxDepth) continue;
+
+      const node = nodes.get(item.slug);
+      if (!node) continue;
+
+      // Intermediate slugs for neighbors: current item's path + current slug
+      // (unless current IS the seed, in which case neighbors have empty path)
+      const nextPath = item.slug === seed
+        ? []
+        : [...item.pathSlugs, item.slug];
+
+      // Down: follow reduces_to toward bedrock
+      for (const parent of node.reduces_to) {
+        if (visited.has(parent)) continue;
+        if (!entrySet.has(parent)) {
+          const relType = (item.hasGoneDown || true) && item.hasGoneUp
+            ? "sibling" : "ancestor";
+          if (!relTypes.has(parent)) relTypes.set(parent, new Set());
+          relTypes.get(parent)!.add(relType);
+          if (!shortestPathSlugs.has(parent)) shortestPathSlugs.set(parent, nextPath);
+        }
+        queue.push({
+          slug: parent,
+          depth: item.depth + 1,
+          hasGoneDown: true,
+          hasGoneUp: item.hasGoneUp,
+          pathSlugs: nextPath,
+        });
+      }
+
+      // Up: follow incoming links toward dependents
+      const children = incomingLinks.get(item.slug) ?? [];
+      for (const child of children) {
+        if (visited.has(child)) continue;
+        if (!entrySet.has(child)) {
+          const relType = item.hasGoneDown && (item.hasGoneUp || true)
+            ? "sibling" : "dependent";
+          if (!relTypes.has(child)) relTypes.set(child, new Set());
+          relTypes.get(child)!.add(relType);
+          if (!shortestPathSlugs.has(child)) shortestPathSlugs.set(child, nextPath);
+        }
+        queue.push({
+          slug: child,
+          depth: item.depth + 1,
+          hasGoneDown: item.hasGoneDown,
+          hasGoneUp: true,
+          pathSlugs: nextPath,
+        });
+      }
+    }
+  }
+
+  // Score and assemble results
+  const results: RelatedNode[] = [];
+  for (const [slug, reach] of reachCount) {
+    const node = nodes.get(slug);
+    if (!node) continue;
+
+    const dist = minDistance.get(slug) ?? 1;
+    const validated = node.status === "Integrated/Validated" ? 0.5 : 0;
+    const levelBonus = node.level === "application" ? 0.3
+      : node.level === "principle" ? 0.2
+      : 0;
+
+    const score = (reach * 2.0) + (1.0 / dist) + validated + levelBonus;
+
+    // Expand path slugs to full node summaries
+    const pathSlugs = shortestPathSlugs.get(slug) ?? [];
+    const path: Array<{ slug: string; title: string; level: string }> = [];
+    for (const s of pathSlugs) {
+      const n = nodes.get(s);
+      if (n) path.push({ slug: s, title: n.title, level: n.level });
+    }
+
+    results.push({
+      slug,
+      title: node.title,
+      level: node.level,
+      status: node.status,
+      tags: node.tags,
+      score: Math.round(score * 100) / 100,
+      reach_count: reach,
+      min_distance: dist,
+      relationship: Array.from(relTypes.get(slug) ?? ["ancestor"]),
+      path,
+    });
+  }
+
+  results.sort((a, b) => b.score - a.score);
+  return results.slice(0, limit);
+}
+
 // ─── Full validation scan ────────────────────────────────────────────
 
 /**

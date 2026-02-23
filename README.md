@@ -145,6 +145,7 @@ Subcommands:
 - `tentative [--older-than <Nd>]` — stale Tentative nodes
 - `tag <tag>` — all nodes with tag, grouped by level
 - `hollow-chains` — validated nodes with a Tentative ancestor anywhere in their chain. Exit 1 if any found. Run alongside `validate` on every purge cycle.
+- `related <query> [--limit N] [--depth N]` — multi-hop graph walk to find epistemically connected nodes. See below.
 
 ### `lattice update <node>`
 
@@ -164,6 +165,90 @@ Subcommands:
 - `list` — print master tag list
 - `add <tag> --reason <node>` — add tag with justified reason
 - `remove <tag>` — remove unused tag
+
+## Memory Retrieval (`query related`)
+
+`lattice query related` is the primary memory-lookup command for an AI agent during a conversation. It finds knowledge that is **epistemically connected** to a topic — not just nodes that share a tag or keyword, but nodes that share foundations, dependents, or ancestors anywhere in the graph.
+
+### Why not just tag search?
+
+Tag search only finds what was explicitly tagged at write time. Two principles about completely different topics may both reduce to the same axiom — they share no tag, no keyword, but they are in the same knowledge cluster. `related` finds that connection by walking the graph.
+
+### Entry point resolution
+
+`<query>` is resolved in order, stopping at the first match:
+
+1. **Slug match** — partial/substring slug → single seed node
+2. **Tag match** — all nodes tagged with that name → multiple seed nodes
+3. **Title keyword** — substring match on titles → matching nodes as seeds
+
+Multi-seed entry (via tag) is more powerful: nodes reachable from multiple seeds score higher, surfacing the connective tissue between clusters.
+
+### The walk
+
+From each seed, a **bidirectional BFS** expands in both directions simultaneously:
+- **Down** — follows `reduces_to` toward bedrock ("what is this grounded in?")
+- **Up** — follows incoming links toward dependents ("what is built on top of this?")
+
+Every intermediate node hit along the way also expands in both directions, up to `--depth` hops (default: 3). This means reaching a shared axiom surfaces all other principles and applications that also rest on it — the cross-cluster connections that make the graph valuable.
+
+### Scoring
+
+Each discovered node is scored by:
+
+| Factor | Weight | Rationale |
+|--------|--------|-----------|
+| `reach_count × 2.0` | High | Reachable from multiple seeds = connective tissue |
+| `1.0 / min_distance` | Medium | Closer neighbours are more relevant |
+| Validated status | +0.5 | Prefer grounded knowledge |
+| Application level | +0.3 | Most directly actionable |
+| Principle level | +0.2 | Second most actionable |
+
+### Output fields
+
+Each result includes:
+
+- **`relationship`** — how this node connects to the entry point:
+  - `ancestor` — reached by going purely down (it's in your foundation)
+  - `dependent` — reached by going purely up (it's built on your entry point)
+  - `sibling` — path went down then up (shares a common ancestor with your entry point)
+- **`path`** — intermediate nodes on the shortest path from seed to this node. Empty if `distance=1`. Use this to understand *why* a node was surfaced without having to trace the graph manually.
+- **`score`**, **`reach_count`**, **`min_distance`** — for ranking and debugging
+
+### Example
+
+```bash
+# During a discussion about whether to rewrite a service:
+$ lattice query related "rewrite" --table
+
+Entry: slug match: "20260303-require-two-week-spike-before-committing-to-a-rewrite"
+Related nodes (top 5, depth=3):
+
+1. [score 3.7] ✓ principle: Irreversible decisions require higher evidence thresholds
+   relationship=ancestor  distance=1  reach=1
+
+2. [score 3.03] ✓ principle: Refactoring without tests multiplies defects
+   relationship=sibling  distance=3  reach=1
+   via: axiom(A is A) → application(Never refactor without full test coverage first)
+
+3. [score 3.0] ✓ axiom: A is A
+   relationship=ancestor  distance=2  reach=1
+```
+
+Result 2 was surfaced even though "refactoring" shares no tag with "rewrite" — both principles share the axiom `A is A` as a common foundation, making them siblings in the same knowledge cluster.
+
+### Agent memory lookup workflow
+
+```bash
+# 1. Enter via the closest known concept (slug or partial title)
+lattice query related "the topic being discussed" --json
+
+# 2. If results are too narrow, broaden to a tag
+lattice query related career --depth 3 --limit 10 --json
+
+# 3. For any promising result, walk its full chain to verify it's grounded
+lattice query chain <slug> --json
+```
 
 ## Purge Agent
 

@@ -1,7 +1,7 @@
 import { Command } from "commander";
 import { resolveVaultPath, requireVault } from "../core/vault.js";
 import { loadAllNodes, type LatticeNode } from "../core/node.js";
-import { buildReductionChain, findHollowChains } from "../core/graph.js";
+import { buildReductionChain, findHollowChains, findRelatedNodes, buildIncomingLinks } from "../core/graph.js";
 import { resolveFormat, formatNodes, formatChainTree } from "../util/format.js";
 import { encode } from "@toon-format/toon";
 import { LatticeError } from "../util/errors.js";
@@ -35,6 +35,7 @@ SUBCOMMANDS:
   tentative      Ungrounded beliefs that need review or deletion.
   tag            Everything you know about a topic, grouped by level.
   hollow-chains  Validated nodes whose chain contains a Tentative ancestor.
+  related        Multi-hop graph walk to find epistemically connected nodes.
 
 WHEN TO USE EACH:
   "What should I do about X?"         → query applications --tag X
@@ -44,6 +45,7 @@ WHEN TO USE EACH:
   "Show me everything about X"        → query tag X
   "Give me a full inventory"          → query all
   "Is any validated node now hollow?" → query hollow-chains
+  "What do I know related to X?"      → query related <query>
 
 Run 'lattice query <subcommand> --help' for full details.
 `,
@@ -534,6 +536,174 @@ GOLDEN EXAMPLES:
     }
   });
 
+  // ─── related ───────────────────────────────────────────────────────
+  const relatedCmd = new Command("related")
+    .description("Find related nodes via multi-hop graph walk in both directions")
+    .argument("<query>", "Partial slug, tag name, or title keyword to seed the search")
+    .option("--limit <n>", "Maximum results to return (default: 5)", "5")
+    .option("--depth <n>", "Maximum hops in each direction (default: 3)", "3")
+    .addHelpText(
+      "after",
+      `
+WHAT THIS DOES:
+  Finds knowledge related to a topic by walking the graph in both directions
+  from one or more entry-point seeds, then scoring every discovered node.
+
+  This is not a keyword search. It is a graph traversal. It finds nodes that
+  are epistemically connected to your query — nodes that share ancestors,
+  nodes that build on the same foundations, nodes that depend on the same
+  principles — even if they share no tag and no keyword with the query.
+
+HOW IT WORKS:
+
+  1. ENTRY POINTS — resolve <query> to seeds (stops at first successful match):
+       a) Slug match (partial/substring) → single seed node
+       b) Tag match  → every node tagged with that name as seeds
+       c) Title keyword match → matching nodes as seeds
+
+  2. GRAPH WALK — from each seed, walk up to --depth hops in both directions:
+       down: follows reduces_to toward bedrock
+             "what is this grounded in?"
+       up:   follows incoming links toward dependents
+             "what else is built on top of this?"
+
+  3. SCORING — each discovered node is scored by:
+       reach_count × 2.0   nodes reachable from multiple seeds are
+                           connective tissue between knowledge clusters
+       1.0 / min_distance  closer neighbours score higher
+       +0.5 if validated   prefer grounded knowledge
+       +0.3 if application most actionable level
+       +0.2 if principle   second most actionable
+
+  4. RETURNS top --limit results sorted by score descending.
+
+WHY THIS FINDS THINGS TAG SEARCH MISSES:
+  Two principles about completely different topics may both reduce to the
+  same axiom. They share no tag, no keyword — but they are in the same
+  knowledge cluster. This command finds that connection. The graph walk
+  surfaces the connective tissue; scoring ensures the most relevant and
+  actionable nodes rise to the top.
+
+OUTPUT:
+  Each result includes:
+    slug, title, level, status, score, reach_count, min_distance
+    relationship — how this node connects to the entry point:
+                   "ancestor"  it's in your foundation (reached going down)
+                   "dependent" it's built on your entry point (reached going up)
+                   "sibling"   shares a common ancestor (path went down then up)
+                   Multiple values possible if reachable via different path shapes.
+    path        — intermediate nodes on the shortest path from seed to this node.
+                  Empty if distance=1. Expand this to understand WHY it was surfaced.
+  --table: ranked list with relationship, distance, and path shown inline
+
+GOLDEN EXAMPLES:
+
+  1. Agent memory lookup during a discussion about deployment risk:
+     $ lattice query related "deploy" --table
+     # Finds: principles about testing, applications about CI, axioms about
+     # determinism — all epistemically connected to deployment
+
+  2. Explore everything connected to a specific node:
+     $ lattice query related untested-code-will-exhibit --limit 10
+
+  3. Enter via tag (all nodes tagged 'risk' become seeds):
+     $ lattice query related risk --depth 2
+
+  4. Machine-readable for agent consumption:
+     $ lattice query related "rewrite vs refactor" --json
+`,
+    );
+
+  relatedCmd.action(async (query: string, opts) => {
+    try {
+      const parentOpts = resolveParentOpts(cmd);
+      const vaultPath = resolveVaultPath(parentOpts.vault ?? ".");
+      await requireVault(vaultPath);
+      const format = resolveFormat(parentOpts);
+
+      const limit = Math.max(1, parseInt(opts.limit as string, 10) || 5);
+      const depth = Math.max(1, parseInt(opts.depth as string, 10) || 3);
+
+      const nodes = await loadAllNodes(vaultPath);
+      const incomingLinks = buildIncomingLinks(nodes);
+
+      // ── Entry point resolution ──────────────────────────────────
+      let entryPoints: string[] = [];
+      let entryMethod = "";
+
+      // 1. Slug match
+      try {
+        const slug = resolveNodeSlug(query, nodes);
+        entryPoints = [slug];
+        entryMethod = `slug match: "${slug}"`;
+      } catch {
+        // 2. Tag match
+        const tagLower = query.toLowerCase().trim();
+        const tagMatches = Array.from(nodes.values())
+          .filter((n) => n.tags.includes(tagLower))
+          .map((n) => n.slug);
+
+        if (tagMatches.length > 0) {
+          entryPoints = tagMatches;
+          entryMethod = `tag match: "${tagLower}" (${tagMatches.length} seeds)`;
+        } else {
+          // 3. Title substring match
+          const titleLower = query.toLowerCase().trim();
+          const titleMatches = Array.from(nodes.values())
+            .filter((n) => n.title.toLowerCase().includes(titleLower))
+            .map((n) => n.slug);
+
+          if (titleMatches.length > 0) {
+            entryPoints = titleMatches;
+            entryMethod = `title match: "${query}" (${titleMatches.length} seeds)`;
+          }
+        }
+      }
+
+      if (entryPoints.length === 0) {
+        throw new LatticeError(
+          `No entry points found for "${query}". Try a partial slug, a tag name, or a title keyword.`,
+          EXIT.BAD_INPUT,
+        );
+      }
+
+      const results = findRelatedNodes(entryPoints, nodes, incomingLinks, depth, limit);
+
+      if (format === "table") {
+        if (results.length === 0) {
+          process.stdout.write(`Entry: ${entryMethod}\nNo related nodes found within ${depth} hops.\n`);
+        } else {
+          const lines: string[] = [
+            `Entry: ${entryMethod}`,
+            `Related nodes (top ${results.length}, depth=${depth}):\n`,
+          ];
+          for (let i = 0; i < results.length; i++) {
+            const r = results[i];
+            const rel = r.relationship.join("+");
+            const validated = r.status === "Integrated/Validated" ? "✓" : "~";
+            lines.push(
+              `${i + 1}. [score ${r.score}] ${validated} ${r.level}: ${r.title}`,
+            );
+            lines.push(`   ${r.slug}`);
+            lines.push(`   relationship=${rel}  distance=${r.min_distance}  reach=${r.reach_count}`);
+            if (r.path.length > 0) {
+              lines.push(`   via: ${r.path.map((p) => `${p.level}(${p.title})`).join(" → ")}`);
+            }
+          }
+          process.stdout.write(lines.join("\n") + "\n");
+        }
+      } else {
+        const output_obj = { entry: entryMethod, results };
+        const output = format === "json"
+          ? JSON.stringify(output_obj, null, 2)
+          : encode(output_obj);
+        process.stdout.write(output + "\n");
+      }
+    } catch (err) {
+      handleError(err);
+    }
+  });
+
   cmd.addCommand(allCmd);
   cmd.addCommand(appCmd);
   cmd.addCommand(prinCmd);
@@ -541,6 +711,7 @@ GOLDEN EXAMPLES:
   cmd.addCommand(tentCmd);
   cmd.addCommand(tagCmd);
   cmd.addCommand(hollowCmd);
+  cmd.addCommand(relatedCmd);
 
   return cmd;
 }
