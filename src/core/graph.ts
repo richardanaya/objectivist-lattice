@@ -34,7 +34,11 @@ export interface ValidationIssue {
 
 /**
  * Check that a reduction link respects level ordering.
- * A node at level L can only reduce to nodes at level < L.
+ * A node at rank R can only reduce to nodes at rank < R.
+ *
+ * Axioms and percepts share rank 0. Neither can reduce to the other —
+ * both are irreducible bedrock. Principles (rank 1) reduce to axioms
+ * or percepts. Applications (rank 2) reduce to principles or bedrock.
  */
 export function validateLevelOrder(
   sourceLevel: Level,
@@ -256,12 +260,13 @@ export function validateGraph(
       }
     }
 
-    // Check non-percept has reduction chain
-    if (node.level !== "percept" && node.reduces_to.length === 0) {
+    // Check that only bedrock nodes (axiom, percept) have empty reduces_to
+    const isBedrock = node.level === "percept" || node.level === "axiom";
+    if (!isBedrock && node.reduces_to.length === 0) {
       issues.push({
         slug,
         type: "missing_reduction",
-        message: `Non-percept node (level: ${node.level}) has no reduces_to links`,
+        message: `Non-bedrock node (level: ${node.level}) has no reduces_to links`,
       });
     }
 
@@ -342,10 +347,14 @@ export function validateGraph(
 }
 
 /**
- * Check if the full reduction chain of a node reaches at least one percept.
- * Used for determining if a chain is "complete" for Integrated/Validated status.
+ * Check if the full reduction chain of a node reaches at least one bedrock node
+ * (axiom or percept). Used for determining if a chain is "complete" for
+ * Integrated/Validated status.
+ *
+ * Both axioms (philosophical bedrock) and percepts (empirical bedrock) are
+ * valid termination points for a reduction chain.
  */
-export function chainReachesPercept(
+export function chainReachesBedrock(
   slug: string,
   nodes: Map<string, LatticeNode>,
 ): boolean {
@@ -359,7 +368,7 @@ export function chainReachesPercept(
 
     const node = nodes.get(current);
     if (!node) continue;
-    if (node.level === "percept") return true;
+    if (node.level === "percept" || node.level === "axiom") return true;
 
     for (const parent of node.reduces_to) {
       stack.push(parent);

@@ -74,38 +74,40 @@ HOW TO CHOOSE THE LEVEL:
     "The build took 14 minutes on commit abc123."
     Rule: If you saw it, heard it, measured it, or read it from a
     primary source, it is a percept. No interpretation. No inference.
-    Percepts have NO --reduces-to links — they are the ground floor.
+    Percepts are EMPIRICAL BEDROCK — no --reduces-to links allowed.
 
-  axiom — Is this a self-evident truth demonstrated by percepts?
+  axiom — Is this a self-evident truth that cannot be further reduced?
+    "Existence exists."
+    "A thing is what it is (identity)."
+    "Contradictions cannot exist in reality."
     "Software does what its code says, not what the developer intended."
-    "Contradictory requirements cannot both be satisfied."
-    "A system's behavior is determined by its actual state, not its docs."
     Rule: If denying it requires using it (stolen concept), it is an axiom.
-    Axioms reduce_to the percepts that demonstrate them.
+    Axioms are PHILOSOPHICAL BEDROCK — no --reduces-to links allowed.
+    An axiom is not proven by percepts; it is validated everywhere by them.
+    The difference: percepts are empirical givens, axioms are conceptual givens.
 
-  principle — Is this a general rule I induced from evidence?
+  principle — Is this a general rule I induced from axioms and/or percepts?
     "Untested code will exhibit its defects in production."
     "Users abandon pages that take longer than 3 seconds to load."
     "Refactoring without tests creates more bugs than it fixes."
-    Rule: If it is a pattern you identified across multiple observations,
-    and it predicts future outcomes, it is a principle.
-    Principles reduce_to axioms and/or percepts.
+    Rule: If it is a pattern you identified, and it predicts future outcomes,
+    it is a principle. Principles reduce_to axioms and/or percepts.
 
   application — Is this a concrete decision or action I will take?
     "Run the full test suite before every deploy. No exceptions."
     "Reject feature requests that contradict the core architecture."
     "Use server-side rendering for all public-facing pages."
-    Rule: If it tells you WHAT TO DO in a specific situation, and it
-    follows logically from a principle, it is an application.
-    Applications reduce_to principles, axioms, and/or percepts.
+    Rule: If it tells you WHAT TO DO and it follows from a principle,
+    it is an application. Applications reduce_to principles.
 
 REDUCTION RULES (enforced — violations produce exit 1):
-  percept     → reduces_to MUST be empty (percepts are the base)
-  axiom       → reduces_to MUST point to percept(s) only
+  axiom       → reduces_to MUST be empty (axioms are philosophical bedrock)
+  percept     → reduces_to MUST be empty (percepts are empirical bedrock)
   principle   → reduces_to MUST point to axiom(s) and/or percept(s)
-  application → reduces_to MUST point to principle(s), axiom(s), and/or percept(s)
+  application → reduces_to MUST point to principle(s) (and/or axioms/percepts)
   Same-level reduction (principle → principle) → REJECTED
-  Upward reduction (percept → axiom) → REJECTED
+  Cross-bedrock reduction (axiom → percept or percept → axiom) → REJECTED
+  Upward reduction (percept/axiom → principle) → REJECTED
   Cycle creation → REJECTED
 
 FILENAME GENERATION:
@@ -127,7 +129,8 @@ OUTPUT ON SUCCESS (exit 0):
   --table: "Node created: <filepath>"
 
 ERROR EXAMPLES:
-  "Error: Non-percept node (level: principle) requires at least one --reduces-to link"
+  "Error: Non-bedrock node (level: principle) requires at least one --reduces-to link. Only axioms and percepts may have empty reduces_to."
+  "Error: Axiom nodes must not have --reduces-to links (they are irreducible bedrock)"
   "Error: Level mismatch: principle cannot reduce to principle"
   "Error: Target node not found: 20260303000000-nonexistent"
   "Error: Cycle detected: adding this link creates a loop"
@@ -135,7 +138,7 @@ ERROR EXAMPLES:
 
 GOLDEN EXAMPLES:
 
-  1. Record an observation (percept — no reduces_to):
+  1. Record an observation (percept — no reduces_to, empirical bedrock):
      $ lattice add --level percept \\
          --title "API returns 500 on null userId" \\
          --proposition "Calling GET /users/null returns HTTP 500 with \\
@@ -143,17 +146,26 @@ GOLDEN EXAMPLES:
          --tags "career,failure" \\
          --status "Integrated/Validated"
 
-  2. Induce a principle from evidence:
+  2. State a self-evident truth (axiom — no reduces_to, philosophical bedrock):
+     $ lattice add --level axiom \\
+         --title "Code behaves according to what it contains" \\
+         --proposition "Software is deterministic: a defect does not \\
+         resolve itself. Code acts according to its actual state, not \\
+         the developer's intent." \\
+         --tags "career" \\
+         --status "Integrated/Validated"
+
+  3. Induce a principle from axioms and/or percepts:
      $ lattice add --level principle \\
          --title "Null inputs must be validated at API boundary" \\
-         --proposition "Because code acts on what it receives (axiom), and \\
+         --proposition "Because code acts on what it contains (axiom), and \\
          because unvalidated null input crashed the user endpoint (percept), \\
          all API handlers must validate inputs before processing." \\
-         -r 20260303091545-code-acts-on-what-it-receives \\
+         -r 20260303091545-code-behaves-according-to-what-it-contains \\
          -r 20260303091500-api-returns-500-on-null-userid \\
          --tags "career,decisions"
 
-  3. Deduce an action from a principle:
+  4. Deduce an action from a principle:
      $ lattice add --level application \\
          --title "Add zod validation to every API route handler" \\
          --proposition "Implement zod schema validation as the first line \\
@@ -164,7 +176,7 @@ GOLDEN EXAMPLES:
          --tags "career,habits,decisions" \\
          --status "Integrated/Validated"
 
-  4. Pipe a long proposition from stdin:
+  5. Pipe a long proposition from stdin:
      $ echo "After three incidents of production outages caused by ..." | \\
          lattice add --level percept \\
          --title "Three outages from config drift in Q1" \\
@@ -222,15 +234,16 @@ GOLDEN EXAMPLES:
         r.replace(/\.md$/, "").trim(),
       );
 
-      // Validate: non-percept requires reduces_to
-      if (level !== "percept" && reducesTo.length === 0) {
+      // Validate: only bedrock nodes (axiom, percept) may have empty reduces_to
+      const isBedrock = level === "percept" || level === "axiom";
+      if (!isBedrock && reducesTo.length === 0) {
         throw new MissingReductionError(level);
       }
 
-      // Validate: percept should not have reduces_to
-      if (level === "percept" && reducesTo.length > 0) {
+      // Validate: bedrock nodes must not have reduces_to
+      if (isBedrock && reducesTo.length > 0) {
         throw new LatticeError(
-          "Percept nodes must not have --reduces-to links (they are the base)",
+          `${level === "axiom" ? "Axiom" : "Percept"} nodes must not have --reduces-to links (they are irreducible bedrock)`,
           EXIT.BAD_INPUT,
         );
       }

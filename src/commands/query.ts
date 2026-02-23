@@ -30,7 +30,7 @@ SUBCOMMANDS:
   all            Everything. Optionally filter by level, status, or tag.
   applications   Your validated action rules (what you DO).
   principles     Your validated general rules (what you KNOW).
-  chain          Full proof tree: "Why do I believe X?" — walks to percepts.
+  chain          Full proof tree: "Why do I believe X?" — walks to bedrock.
   tentative      Ungrounded beliefs that need review or deletion.
   tag            Everything you know about a topic, grouped by level.
 
@@ -246,11 +246,11 @@ GOLDEN EXAMPLES:
 WHAT THIS DOES:
   The most important query in the lattice. Walks backward from any node
   through its reduces_to links, building a complete proof tree down to
-  the percepts at the base.
+  the bedrock (axioms and/or percepts) at the base.
 
   This is how you answer: "WHY do I believe this?"
 
-  If the chain is complete (reaches percepts) → the belief is grounded.
+  If the chain reaches bedrock (axiom or percept) → the belief is grounded.
   If the chain has broken links → the belief is floating. Fix or delete it.
   If the chain is shallow → the belief needs more evidence.
 

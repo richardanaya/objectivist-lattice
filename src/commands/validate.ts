@@ -41,8 +41,9 @@ CHECKS PERFORMED:
   - Level mismatches: a principle reducing to another principle, etc.
   - Cycles: circular reduction chains (A reduces to B reduces to A)
   - Rogue tags: tags on nodes that are not in the master tags.json
-  - Missing reductions: non-percept nodes with no reduces_to links
+  - Missing reductions: principle or application nodes with no reduces_to links
     (these are floating abstractions — the thing the lattice exists to prevent)
+    Note: axioms and percepts are bedrock — empty reduces_to is correct for them.
   - Stale tentatives: Tentative/Hypothesis nodes older than 14 days
     (if you have not grounded a belief in two weeks, it is probably noise)
 

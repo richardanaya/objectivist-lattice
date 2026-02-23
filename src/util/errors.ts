@@ -40,11 +40,11 @@ export class InvalidLevelError extends LatticeError {
   }
 }
 
-/** Missing reduces_to on non-percept node. */
+/** Missing reduces_to on a non-bedrock node (principle or application). */
 export class MissingReductionError extends LatticeError {
   constructor(level: string) {
     super(
-      `Non-percept node (level: ${level}) requires at least one --reduces-to link`,
+      `Non-bedrock node (level: ${level}) requires at least one --reduces-to link. Only axioms and percepts may have empty reduces_to.`,
       EXIT.BAD_INPUT,
     );
     this.name = "MissingReductionError";

@@ -1,6 +1,6 @@
 # Objectivist Knowledge Lattice
 
-A CLI that enforces percept > axiom > principle > application hierarchy on a filesystem of Markdown files. Zettelkasten corrected by reality. No floating abstractions allowed.
+A CLI that enforces axiom/percept → principle → application hierarchy on a filesystem of Markdown files. Zettelkasten corrected by reality. No floating abstractions allowed.
 
 Designed for LLM agents and rational humans pursuing epistemological hygiene.
 
@@ -18,23 +18,23 @@ Binary name: `lattice`
 # Initialize a vault in the current directory
 lattice init
 
-# Add a percept (raw fact)
+# Add an axiom (philosophical bedrock — no reduces_to)
+lattice add --level axiom \
+  --title "A is A" \
+  --proposition "A thing is what it is and cannot be what it is not." \
+  --tags "learning"
+
+# Add a percept (empirical bedrock — no reduces_to)
 lattice add --level percept \
   --title "Ball falls when dropped" \
   --proposition "Dropping a ball results in it falling every time."
 
-# Add an axiom reducing to the percept
-lattice add --level axiom \
-  --title "A is A" \
-  --proposition "A thing is what it is and cannot be what it is not." \
-  -r 202602221400-ball-falls-when-dropped \
-  --tags "learning"
-
-# Add a principle reducing to the axiom
+# Add a principle reducing to the axiom and percept
 lattice add --level principle \
   --title "Causality is identity applied to action" \
   --proposition "Entities act according to their nature." \
   -r 202602221400-a-is-a \
+  -r 202602221400-ball-falls-when-dropped \
   --tags "decisions,ethics"
 
 # Add an application reducing to the principle
@@ -58,12 +58,12 @@ A filesystem-based directed acyclic graph (DAG) of knowledge nodes. Each node is
 
 | Level | Folder | Description |
 |-------|--------|-------------|
-| percept | `01-Percepts/` | Raw sensory/empirical facts |
-| axiom | `02-Axioms/` | Self-evident base truths |
+| axiom | `01-Axioms/` | Self-evident philosophical bedrock |
+| percept | `02-Percepts/` | Raw sensory/empirical facts |
 | principle | `03-Principles/` | Induced general rules |
 | application | `04-Applications/` | Deduced concrete actions |
 
-Every non-percept node must have `reduces_to` links pointing to nodes at a **lower** level. This is the reduction spine. Break it and the node is quarantined as `Tentative/Hypothesis`.
+Axioms and percepts are **co-equal bedrock** — neither reduces to the other. Principles and applications must have `reduces_to` links pointing to nodes at a lower rank. Break the spine and the node is quarantined as `Tentative/Hypothesis`.
 
 ## Data Model
 
@@ -90,8 +90,8 @@ tags:
 
 ```
 <vault>/
-├── 01-Percepts/
-├── 02-Axioms/
+├── 01-Axioms/
+├── 02-Percepts/
 ├── 03-Principles/
 ├── 04-Applications/
 ├── tags.json              # Machine-readable master tag list
@@ -102,11 +102,13 @@ tags:
 
 ### Validation Rules
 
-- Percepts have no `reduces_to` links (they are the base)
-- Axioms reduce only to percepts
-- Principles reduce only to percepts or axioms
-- Applications reduce to percepts, axioms, or principles
-- Same-level or upward reduction is rejected
+- Axioms have no `reduces_to` links (philosophical bedrock — irreducible)
+- Percepts have no `reduces_to` links (empirical bedrock — irreducible)
+- Principles reduce to axioms and/or percepts
+- Applications reduce to principles (and/or axioms/percepts)
+- Cross-bedrock reduction (axiom → percept or percept → axiom) is rejected
+- Same-level reduction (principle → principle) is rejected
+- Upward reduction is rejected
 - Cycles are rejected
 - Tags must exist in `tags.json`
 

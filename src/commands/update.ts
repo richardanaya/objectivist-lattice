@@ -75,8 +75,9 @@ VALIDATION (still enforced on update):
   - New tags must exist in tags.json
   - New reduces_to targets must exist and obey level ordering
   - Cycle detection runs on every new link
-  - Removing ALL reduces_to from a non-percept auto-sets status to Tentative
-    (because a principle with no evidence is, by definition, ungrounded)
+  - Removing ALL reduces_to from a principle or application auto-sets status
+    to Tentative (a principle with no grounding is, by definition, floating)
+  - Axioms and percepts may not have reduces_to added (they are bedrock)
 
 OUTPUT:
   Default (TOON): { updated: "<slug>", changes: { ... } }
@@ -219,9 +220,10 @@ GOLDEN EXAMPLES:
         newReducesTo = currentReduces;
         changes.reduces_to = newReducesTo.join(",") || "(empty)";
 
-        // If non-percept loses all reduces_to, force Tentative
+        // If a non-bedrock node loses all reduces_to, force Tentative
+        const isBedrock = node.level === "percept" || node.level === "axiom";
         if (
-          node.level !== "percept" &&
+          !isBedrock &&
           newReducesTo.length === 0 &&
           !newStatus
         ) {

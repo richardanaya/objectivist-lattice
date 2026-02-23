@@ -1,11 +1,21 @@
 /**
  * Core constants for the Objectivist Knowledge Lattice.
  *
- * LEVEL HIERARCHY (strict ordering, reduction only downward):
- *   application (3) > principle (2) > axiom (1) > percept (0)
+ * LEVEL HIERARCHY:
+ *   axiom    (0) — Philosophical bedrock. Self-evident, irreducible.
+ *                  Cannot be proven, only validated. No reduces_to.
+ *   percept  (0) — Empirical bedrock. Directly observed fact.
+ *                  Cannot be reduced further. No reduces_to.
+ *   principle (1) — Induced general rule. Reduces to axioms and/or percepts.
+ *   application (2) — Concrete action/decision. Reduces to principles
+ *                     (and/or axioms/percepts).
  *
- * A node at level N may only have reduces_to links pointing to nodes
- * at level < N. Same-level or upward reduction is always rejected.
+ * Axioms and percepts are co-equal bedrock at rank 0. Neither reduces to
+ * the other — that would violate their irreducibility. Principles reduce
+ * to one or both bedrock types. Applications reduce to principles.
+ *
+ * A node at rank N may only have reduces_to links pointing to nodes
+ * at rank < N. Same-level or upward reduction is always rejected.
  */
 
 export const LEVELS = ["percept", "axiom", "principle", "application"] as const;
@@ -15,12 +25,15 @@ export type Level = (typeof LEVELS)[number];
  * Numeric rank for each level. Higher number = higher in the hierarchy.
  * Used for enforcing reduction direction: a node can only reduce to
  * nodes with a LOWER rank number.
+ *
+ * Axioms and percepts share rank 0 — both are irreducible bedrock.
+ * Neither can reduce to the other.
  */
 export const LEVEL_RANK: Record<Level, number> = {
   percept: 0,
-  axiom: 1,
-  principle: 2,
-  application: 3,
+  axiom: 0,
+  principle: 1,
+  application: 2,
 };
 
 /**
@@ -28,8 +41,8 @@ export const LEVEL_RANK: Record<Level, number> = {
  * Folders are number-prefixed to enforce visual ordering in file browsers.
  */
 export const LEVEL_FOLDERS: Record<Level, string> = {
-  percept: "01-Percepts",
-  axiom: "02-Axioms",
+  axiom: "01-Axioms",
+  percept: "02-Percepts",
   principle: "03-Principles",
   application: "04-Applications",
 };
