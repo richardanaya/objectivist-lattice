@@ -2,7 +2,7 @@ import { Command, Option } from "commander";
 import { resolveVaultPath, requireVault } from "../core/vault.js";
 import { loadTags, validateTags } from "../core/tags.js";
 import { loadAllNodes, updateNodeFile } from "../core/node.js";
-import { validateReductionLinks } from "../core/graph.js";
+import { validateReductionLinks, validateParentsAreValidated, findTentativeChildren } from "../core/graph.js";
 import { STATUSES, LEVELS, type Status } from "../core/constants.js";
 import { LatticeError } from "../util/errors.js";
 import { EXIT } from "../core/constants.js";
@@ -53,12 +53,16 @@ WHAT THIS DOES:
   or refine its categorization by adjusting tags.
 
 THE PROMOTION WORKFLOW:
-  When you first add a node, it defaults to Tentative/Hypothesis.
-  This means "I believe this but have not fully verified the chain."
+  Bedrock nodes (axiom, percept) are always Integrated/Validated — no
+  promotion needed or allowed. Their presence in the vault IS their validation.
+
+  Principles and applications start as Tentative/Hypothesis by default.
+  To promote, work bottom-up: validate parents before children.
   Once you have:
-    1. Confirmed all reduces_to targets exist and are themselves Validated
-    2. Checked for contradictions with existing principles
-    3. Verified the chain reaches percepts (lattice query chain <node>)
+    1. Verified all reduces_to parents are themselves Integrated/Validated
+       (enforced — the CLI will reject promotion if any parent is Tentative)
+    2. Checked for contradictions with existing validated nodes
+    3. Verified the chain reaches bedrock (lattice query chain <node>)
   Then promote it:
     $ lattice update <node> --status "Integrated/Validated"
   Now it appears in 'query applications' and 'query principles' results.
@@ -86,10 +90,11 @@ OUTPUT:
 
 GOLDEN EXAMPLES:
 
-  1. Promote a percept after confirming the observation:
-     $ lattice update api-returns-500 --status "Integrated/Validated"
-     Updated: 20260303091500-api-returns-500-on-null-userid
+  1. Promote a principle once its parents are validated:
+     $ lattice update null-inputs-must-be-validated --status "Integrated/Validated"
+     Updated: 20260303091620-null-inputs-must-be-validated-at-api-boundary
        (status: Tentative/Hypothesis → Integrated/Validated)
+     # ERROR if any reduces_to parent is still Tentative/Hypothesis
 
   2. Add a newly discovered reduction link to an existing principle:
      $ lattice update untested-code-will-exhibit \\
@@ -128,8 +133,15 @@ GOLDEN EXAMPLES:
       const changes: Record<string, string> = {};
 
       // ── Status update ──
+      const isBedrock = node.level === "percept" || node.level === "axiom";
       let newStatus: Status | undefined;
       if (opts.status) {
+        if (isBedrock) {
+          throw new LatticeError(
+            `Cannot change status of a ${node.level} node. Bedrock nodes (axiom, percept) are always Integrated/Validated.`,
+            EXIT.BAD_INPUT,
+          );
+        }
         newStatus = opts.status as Status;
         changes.status = `${node.status} → ${newStatus}`;
       }
@@ -221,7 +233,6 @@ GOLDEN EXAMPLES:
         changes.reduces_to = newReducesTo.join(",") || "(empty)";
 
         // If a non-bedrock node loses all reduces_to, force Tentative
-        const isBedrock = node.level === "percept" || node.level === "axiom";
         if (
           !isBedrock &&
           newReducesTo.length === 0 &&
@@ -240,6 +251,13 @@ GOLDEN EXAMPLES:
         );
       }
 
+      // Enforce: cannot promote to Integrated/Validated if any parent is still Tentative
+      const effectiveStatus = newStatus ?? node.status;
+      const effectiveReducesTo = newReducesTo ?? node.reduces_to;
+      if (effectiveStatus === "Integrated/Validated" && effectiveReducesTo.length > 0) {
+        validateParentsAreValidated(effectiveReducesTo, nodes);
+      }
+
       // Apply the update
       await updateNodeFile(node, {
         status: newStatus,
@@ -247,8 +265,22 @@ GOLDEN EXAMPLES:
         reduces_to: newReducesTo,
       });
 
+      // Check for Tentative nodes that reduce to this one and may now be promotable
+      const tentativeChildren =
+        effectiveStatus === "Integrated/Validated"
+          ? findTentativeChildren(slug, nodes)
+          : [];
+      const promotionHints = tentativeChildren.map((n) => ({ slug: n.slug, title: n.title }));
+
       // Output
-      const result = { updated: slug, changes };
+      const result: Record<string, unknown> = { updated: slug, changes };
+      if (promotionHints.length > 0) {
+        result.promotion_hints = {
+          message:
+            "This node is now Integrated/Validated. The following nodes reduce to it and are still Tentative/Hypothesis — their chain may now be complete. Consider running 'lattice update <slug> --status Integrated/Validated' for each.",
+          nodes: promotionHints,
+        };
+      }
       switch (format) {
         case "json":
           process.stdout.write(JSON.stringify(result, null, 2) + "\n");
@@ -260,7 +292,13 @@ GOLDEN EXAMPLES:
           const parts = Object.entries(changes)
             .map(([k, v]) => `${k}: ${v}`)
             .join(", ");
-          process.stdout.write(`Updated: ${slug} (${parts})\n`);
+          let out = `Updated: ${slug} (${parts})`;
+          if (promotionHints.length > 0) {
+            out +=
+              "\n\nNow validated — these nodes may be ready for promotion:\n" +
+              promotionHints.map((h) => `  ${h.slug}  "${h.title}"`).join("\n");
+          }
+          process.stdout.write(out + "\n");
           break;
         }
       }

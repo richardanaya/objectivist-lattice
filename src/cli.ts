@@ -145,6 +145,7 @@ COMMANDS:
                chain         — Full backward reduction tree to bedrock (axioms/percepts)
                tentative     — Ungrounded nodes needing review
                tag           — All nodes on a topic, grouped by level
+               hollow-chains — Validated nodes whose chain contains a Tentative ancestor
   validate   Integrity scan. Catches broken chains, cycles, rogue tags.
   delete     Remove a node. Only Tentative or zero-incoming-links.
   tags       Manage the master tag list (list / add / remove).
@@ -152,16 +153,56 @@ COMMANDS:
 AGENT WORKFLOW (recommended daily cycle):
   1. lattice validate                    — Check vault health first
   2. lattice query tentative             — Review ungrounded beliefs
-  3. For each tentative: update, ground it, or delete it
+  3. For each tentative: ground it (add parents, promote) or delete it
   4. When you observe something new:
-     lattice add --level percept ...     — Record the observation
-  5. When you identify a pattern:
-     lattice add --level principle ...   — Induce the rule, link to evidence
-  6. When you decide on an action:
+     lattice add --level percept ...     — Record the observation (auto-validated)
+  5. When you identify a self-evident truth:
+     lattice add --level axiom ...       — Record the axiom (auto-validated)
+  6. When you identify a pattern:
+     lattice add --level principle ...   — Induce the rule, link to bedrock
+     lattice update <principle> --status "Integrated/Validated"  — promote when ready
+  7. When you decide on an action:
      lattice add --level application ... — Deduce the action, link to principle
-  7. Before any significant decision:
+     lattice update <application> --status "Integrated/Validated"  — promote when ready
+  8. Before any significant decision:
      lattice query chain <decision>      — Verify the proof chain holds
-  8. lattice validate                    — Confirm nothing is broken
+  9. lattice validate                    — Confirm nothing is broken
+
+PURGE AGENT WORKFLOW (weekly cron job):
+  A separate agent whose only job is epistemic hygiene — surface weak nodes,
+  delete obvious garbage, never make judgment calls.
+
+  Recommended cadence: weekly. The 14-day --fix-auto threshold is the binding
+  constraint; running more often finds nothing new eligible for deletion.
+
+  Step 1 — Structural integrity (stop here if exit 1, alert a human):
+    $ lattice validate --json
+
+  Step 2 — Hollow chains (validated nodes with a Tentative ancestor):
+    $ lattice query hollow-chains --json
+    # validate will NOT catch these. This is a separate failure mode:
+    # a parent was demoted AFTER the child was already validated.
+    # For each result: re-validate the weak-link ancestor, OR demote
+    # the hollow node: lattice update <slug> --status "Tentative/Hypothesis"
+
+  Step 3 — Stale tentatives approaching threshold (7-day warning window):
+    $ lattice query tentative --older-than 7d --json
+    # These will hit the 14-day auto-delete threshold next week.
+    # Surface for human review: ground them or delete them manually.
+
+  Step 4 — Preview auto-deletion (always log before deleting):
+    $ lattice validate --fix-auto --dry-run --json
+
+  Step 5 — Execute auto-deletion:
+    $ lattice validate --fix-auto --json
+    # Only deletes: Tentative + zero reduces_to + older than 14 days.
+    # Abandoned drafts with no chain started. Nothing else is touched.
+
+  What the purge agent never does:
+    - Demote validated nodes (hollow-chains output is for human review)
+    - Delete nodes with partial chains
+    - Promote anything
+    - Skip the dry-run step
 
 GOLDEN EXAMPLE — Building a complete chain from scratch:
 
@@ -187,7 +228,7 @@ GOLDEN EXAMPLE — Building a complete chain from scratch:
       --status "Integrated/Validated"
   # Slug output: 20260303091545-code-behaves-according-to-what-it-contains
 
-  # Principle: induced from the axiom + percept (reduces to both)
+  # Principle: induced from the axiom + percept (starts Tentative by default)
   $ lattice add --level principle \\
       --title "Untested code will exhibit its defects in production" \\
       --proposition "Because code acts according to what it contains (axiom), \\
@@ -195,11 +236,14 @@ GOLDEN EXAMPLE — Building a complete chain from scratch:
       guarantees that any existing defect reaches users (percept)." \\
       -r 20260303091545-code-behaves-according-to-what-it-contains \\
       -r 20260303091500-deploy-without-tests-crashed-prod-on-march-3 \\
-      --tags "career,decisions" \\
-      --status "Integrated/Validated"
+      --tags "career,decisions"
   # Slug output: 20260303091620-untested-code-will-exhibit-its-defects-in-pro
 
-  # Application: deduced from the principle
+  # Promote the principle — parents are bedrock (auto-validated), so this succeeds
+  $ lattice update 20260303091620-untested-code-will-exhibit-its-defects-in-pro \\
+      --status "Integrated/Validated"
+
+  # Application: deduced from the now-validated principle
   $ lattice add --level application \\
       --title "Run full test suite before every deploy" \\
       --proposition "Before any deployment to production, run the complete \\

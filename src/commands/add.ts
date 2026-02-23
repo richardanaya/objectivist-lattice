@@ -7,7 +7,7 @@ import {
   filenameToSlug,
   generateFilename,
 } from "../core/node.js";
-import { validateReductionLinks } from "../core/graph.js";
+import { validateReductionLinks, validateParentsAreValidated, findTentativeChildren } from "../core/graph.js";
 import {
   LEVELS,
   STATUSES,
@@ -49,7 +49,10 @@ export function makeAddCommand(): Command {
     )
     .option("--tags <tags>", "Comma-separated tags from master list")
     .addOption(
-      new Option("--status <status>", "Validation status")
+      new Option(
+        "--status <status>",
+        "Validation status. Ignored for axiom/percept — bedrock is always Integrated/Validated.",
+      )
         .choices([...STATUSES])
         .default("Tentative/Hypothesis"),
     )
@@ -119,9 +122,11 @@ FLAGS:
   --level         REQUIRED. percept | axiom | principle | application
   --title         REQUIRED. Full human-readable title.
   --proposition   REQUIRED. The claim in propositional form. Use "-" for stdin.
-  -r, --reduces-to  Slug of parent node (repeatable). Required for non-percepts.
+  -r, --reduces-to  Slug of parent node (repeatable). Required for principles/applications.
   --tags          Comma-separated tags from master list (e.g. "career,decisions")
   --status        "Integrated/Validated" or "Tentative/Hypothesis" (default: Tentative)
+                  Ignored for axiom/percept — bedrock is always Integrated/Validated.
+                  Cannot be Integrated/Validated if any parent is still Tentative/Hypothesis.
 
 OUTPUT ON SUCCESS (exit 0):
   Default (TOON): structured { created, slug, node } object
@@ -129,33 +134,32 @@ OUTPUT ON SUCCESS (exit 0):
   --table: "Node created: <filepath>"
 
 ERROR EXAMPLES:
-  "Error: Non-bedrock node (level: principle) requires at least one --reduces-to link. Only axioms and percepts may have empty reduces_to."
+  "Error: Non-bedrock node (level: principle) requires at least one --reduces-to link."
   "Error: Axiom nodes must not have --reduces-to links (they are irreducible bedrock)"
   "Error: Level mismatch: principle cannot reduce to principle"
   "Error: Target node not found: 20260303000000-nonexistent"
   "Error: Cycle detected: adding this link creates a loop"
   "Error: Rogue tag 'vibes' not in tags.json"
+  "Error: Cannot validate: parent node '<slug>' is still Tentative/Hypothesis"
 
 GOLDEN EXAMPLES:
 
-  1. Record an observation (percept — no reduces_to, empirical bedrock):
+  1. Record an observation (percept — no reduces_to, always Integrated/Validated):
      $ lattice add --level percept \\
          --title "API returns 500 on null userId" \\
          --proposition "Calling GET /users/null returns HTTP 500 with \\
          stack trace showing TypeError in UserService.findById." \\
-         --tags "career,failure" \\
-         --status "Integrated/Validated"
+         --tags "career,failure"
 
-  2. State a self-evident truth (axiom — no reduces_to, philosophical bedrock):
+  2. State a self-evident truth (axiom — no reduces_to, always Integrated/Validated):
      $ lattice add --level axiom \\
          --title "Code behaves according to what it contains" \\
          --proposition "Software is deterministic: a defect does not \\
          resolve itself. Code acts according to its actual state, not \\
          the developer's intent." \\
-         --tags "career" \\
-         --status "Integrated/Validated"
+         --tags "career"
 
-  3. Induce a principle from axioms and/or percepts:
+  3. Induce a principle from axioms and/or percepts (starts Tentative by default):
      $ lattice add --level principle \\
          --title "Null inputs must be validated at API boundary" \\
          --proposition "Because code acts on what it contains (axiom), and \\
@@ -164,8 +168,10 @@ GOLDEN EXAMPLES:
          -r 20260303091545-code-behaves-according-to-what-it-contains \\
          -r 20260303091500-api-returns-500-on-null-userid \\
          --tags "career,decisions"
+     # Then promote once you are satisfied:
+     # lattice update null-inputs-must-be --status "Integrated/Validated"
 
-  4. Deduce an action from a principle:
+  4. Deduce an action from a validated principle (can be immediately validated):
      $ lattice add --level application \\
          --title "Add zod validation to every API route handler" \\
          --proposition "Implement zod schema validation as the first line \\
@@ -199,8 +205,8 @@ GOLDEN EXAMPLES:
       }
 
       // Validate status
-      const status = opts.status as Status;
-      if (!STATUSES.includes(status)) {
+      const statusInput = opts.status as Status;
+      if (!STATUSES.includes(statusInput)) {
         throw new InvalidStatusError(opts.status);
       }
 
@@ -234,8 +240,12 @@ GOLDEN EXAMPLES:
         r.replace(/\.md$/, "").trim(),
       );
 
-      // Validate: only bedrock nodes (axiom, percept) may have empty reduces_to
+      // Bedrock nodes (axiom, percept) are always Integrated/Validated.
+      // Their existence in the vault is their validation — no lifecycle needed.
       const isBedrock = level === "percept" || level === "axiom";
+      const status: Status = isBedrock ? "Integrated/Validated" : statusInput;
+
+      // Validate: only bedrock nodes may have empty reduces_to
       if (!isBedrock && reducesTo.length === 0) {
         throw new MissingReductionError(level);
       }
@@ -258,6 +268,11 @@ GOLDEN EXAMPLES:
       // Validate reduction links (existence, level order, cycles)
       if (reducesTo.length > 0) {
         validateReductionLinks(newSlug, level, reducesTo, nodes);
+      }
+
+      // Validate: cannot be Integrated/Validated if any parent is not
+      if (status === "Integrated/Validated" && reducesTo.length > 0) {
+        validateParentsAreValidated(reducesTo, nodes);
       }
 
       // Create the node
@@ -284,11 +299,32 @@ GOLDEN EXAMPLES:
         proposition,
       };
 
+      // Check for Tentative nodes that reduce to this one and may now be promotable
+      let promotionHints: Array<{ slug: string; title: string }> | undefined;
+      if (status === "Integrated/Validated") {
+        nodes.set(result.slug, {
+          slug: result.slug,
+          title: opts.title,
+          level,
+          reduces_to: reducesTo,
+          status,
+          tags,
+          proposition,
+          filePath: result.filePath,
+          created: new Date(),
+        });
+        const tentativeChildren = findTentativeChildren(result.slug, nodes);
+        if (tentativeChildren.length > 0) {
+          promotionHints = tentativeChildren.map((n) => ({ slug: n.slug, title: n.title }));
+        }
+      }
+
       const output = formatCreated(
         result.slug,
         result.filePath,
         nodeObj,
         format,
+        promotionHints,
       );
       process.stdout.write(output + "\n");
     } catch (err) {

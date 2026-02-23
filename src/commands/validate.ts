@@ -104,7 +104,8 @@ GOLDEN EXAMPLES:
         );
         for (const issue of staleTentatives) {
           const node = nodes.get(issue.slug);
-          if (node && node.reduces_to.length === 0) {
+          const isBedrockNode = node && (node.level === "percept" || node.level === "axiom");
+          if (node && !isBedrockNode && node.reduces_to.length === 0) {
             if (opts.dryRun) {
               process.stderr.write(
                 `Would delete: ${node.filePath}\n`,

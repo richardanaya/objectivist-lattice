@@ -137,6 +137,21 @@ export class AmbiguousMatchError extends LatticeError {
   }
 }
 
+/**
+ * Attempted to promote a node to Integrated/Validated when one or more
+ * of its reduces_to parents are still Tentative/Hypothesis.
+ * A chain is only as strong as its weakest link.
+ */
+export class UnvalidatedParentError extends LatticeError {
+  constructor(parentSlug: string) {
+    super(
+      `Cannot validate: parent node '${parentSlug}' is still Tentative/Hypothesis. Validate all parents before validating this node.`,
+      EXIT.VALIDATION_ERROR,
+    );
+    this.name = "UnvalidatedParentError";
+  }
+}
+
 /** Duplicate node slug already exists. */
 export class DuplicateSlugError extends LatticeError {
   constructor(slug: string) {

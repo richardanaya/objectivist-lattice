@@ -1,8 +1,9 @@
 import { Command } from "commander";
 import { resolveVaultPath, requireVault } from "../core/vault.js";
 import { loadAllNodes, type LatticeNode } from "../core/node.js";
-import { buildReductionChain } from "../core/graph.js";
+import { buildReductionChain, findHollowChains } from "../core/graph.js";
 import { resolveFormat, formatNodes, formatChainTree } from "../util/format.js";
+import { encode } from "@toon-format/toon";
 import { LatticeError } from "../util/errors.js";
 import { EXIT, LEVELS } from "../core/constants.js";
 import { resolveParentOpts, handleError, resolveNodeSlug } from "../util/cli-helpers.js";
@@ -33,6 +34,7 @@ SUBCOMMANDS:
   chain          Full proof tree: "Why do I believe X?" — walks to bedrock.
   tentative      Ungrounded beliefs that need review or deletion.
   tag            Everything you know about a topic, grouped by level.
+  hollow-chains  Validated nodes whose chain contains a Tentative ancestor.
 
 WHEN TO USE EACH:
   "What should I do about X?"         → query applications --tag X
@@ -41,6 +43,7 @@ WHEN TO USE EACH:
   "What needs my attention today?"    → query tentative
   "Show me everything about X"        → query tag X
   "Give me a full inventory"          → query all
+  "Is any validated node now hollow?" → query hollow-chains
 
 Run 'lattice query <subcommand> --help' for full details.
 `,
@@ -441,12 +444,103 @@ GOLDEN EXAMPLES:
     }
   });
 
+  // ─── hollow-chains ─────────────────────────────────────────────────
+  const hollowCmd = new Command("hollow-chains")
+    .description("Find Integrated/Validated nodes whose reduction chain contains a Tentative ancestor")
+    .addHelpText(
+      "after",
+      `
+WHAT THIS DOES:
+  Finds every Integrated/Validated non-bedrock node that has at least one
+  Tentative/Hypothesis node anywhere in its full reduction chain.
+
+  This catches a specific failure mode: a parent node gets demoted back to
+  Tentative (or was never properly validated) AFTER a child was already
+  promoted to Integrated/Validated. The child's status looks clean but the
+  epistemic ground beneath it has been pulled out. The chain is structurally
+  intact — no broken links — but hollow.
+
+  'lattice validate' will NOT catch this. This command exists specifically
+  to find it.
+
+  For each hollow node, the output lists the exact weak-link ancestors so
+  you know what to fix. The resolution is always one of:
+    a) Re-validate the weak-link ancestor (if the chain is actually sound)
+    b) Demote the hollow node back to Tentative/Hypothesis until the chain
+       is repaired (lattice update <slug> --status "Tentative/Hypothesis")
+
+  A purge agent should run this alongside 'lattice validate' on every cycle.
+  Exit code 1 if any hollow chains are found, 0 if the vault is clean.
+
+OUTPUT:
+  Default (TOON/JSON): array of { slug, title, level, weak_links: [...] }
+  --table: human-readable summary per hollow node
+
+GOLDEN EXAMPLES:
+
+  1. Check for hollow chains (purge agent daily cycle):
+     $ lattice query hollow-chains
+     # Exit 0 → all validated chains are sound
+     # Exit 1 → read output, demote or repair each listed node
+
+  2. Parse programmatically to get slugs needing demotion:
+     $ lattice query hollow-chains --json | jq '.[].slug'
+
+  3. Human review at terminal:
+     $ lattice query hollow-chains --table
+`,
+    );
+
+  hollowCmd.action(async () => {
+    try {
+      const parentOpts = resolveParentOpts(cmd);
+      const vaultPath = resolveVaultPath(parentOpts.vault ?? ".");
+      await requireVault(vaultPath);
+      const format = resolveFormat(parentOpts);
+
+      const nodes = await loadAllNodes(vaultPath);
+      const results = findHollowChains(nodes);
+
+      if (format === "table") {
+        if (results.length === 0) {
+          process.stdout.write("All validated chains are sound. No hollow chains found.\n");
+        } else {
+          const lines: string[] = [
+            `${results.length} hollow chain(s) found:\n`,
+          ];
+          for (const r of results) {
+            lines.push(`${r.level}: ${r.title}`);
+            lines.push(`  slug: ${r.slug}`);
+            lines.push(`  weak links:`);
+            for (const w of r.weak_links) {
+              lines.push(`    ${w.level}: "${w.title}"  (${w.slug})`);
+            }
+            lines.push("");
+          }
+          process.stdout.write(lines.join("\n") + "\n");
+        }
+      } else {
+        const output = format === "json"
+          ? JSON.stringify(results, null, 2)
+          : encode(results);
+        process.stdout.write(output + "\n");
+      }
+
+      if (results.length > 0) {
+        process.exit(EXIT.VALIDATION_ERROR);
+      }
+    } catch (err) {
+      handleError(err);
+    }
+  });
+
   cmd.addCommand(allCmd);
   cmd.addCommand(appCmd);
   cmd.addCommand(prinCmd);
   cmd.addCommand(chainCmd);
   cmd.addCommand(tentCmd);
   cmd.addCommand(tagCmd);
+  cmd.addCommand(hollowCmd);
 
   return cmd;
 }

@@ -4,6 +4,7 @@ import {
   CycleDetectedError,
   LevelMismatchError,
   TargetNotFoundError,
+  UnvalidatedParentError,
 } from "../util/errors.js";
 
 // ─── Graph types ─────────────────────────────────────────────────────
@@ -120,6 +121,28 @@ export function validateReductionLinks(
 
     if (wouldCreateCycle(sourceSlug, targetSlug, nodes)) {
       throw new CycleDetectedError();
+    }
+  }
+}
+
+/**
+ * Validate that all direct parents (reduces_to targets) of a node are
+ * Integrated/Validated before the node itself can be promoted.
+ * Throws UnvalidatedParentError on the first unvalidated parent found.
+ *
+ * Only checks direct parents — the caller is responsible for ensuring
+ * the full chain is clean via repeated promotion from the bottom up.
+ */
+export function validateParentsAreValidated(
+  reducesTo: string[],
+  nodes: Map<string, LatticeNode>,
+): void {
+  for (const parentSlug of reducesTo) {
+    const parent = nodes.get(parentSlug);
+    // Missing parents are caught by validateReductionLinks; skip here
+    if (!parent) continue;
+    if (parent.status === "Tentative/Hypothesis") {
+      throw new UnvalidatedParentError(parentSlug);
     }
   }
 }
@@ -281,8 +304,8 @@ export function validateGraph(
       }
     }
 
-    // Check stale tentatives (>14 days)
-    if (node.status === "Tentative/Hypothesis") {
+    // Check stale tentatives (>14 days) — bedrock is always validated, never stale
+    if (!isBedrock && node.status === "Tentative/Hypothesis") {
       const age = Date.now() - node.created.getTime();
       const dayMs = 24 * 60 * 60 * 1000;
       if (age > 14 * dayMs) {
@@ -344,6 +367,102 @@ export function validateGraph(
   }
 
   return issues;
+}
+
+// ─── Hollow chain detection ──────────────────────────────────────────
+
+/**
+ * A validated node whose reduction chain contains at least one
+ * Tentative/Hypothesis node. Structurally intact but epistemically hollow.
+ */
+export interface HollowChainResult {
+  /** The validated node whose chain is hollow. */
+  slug: string;
+  title: string;
+  level: string;
+  /** The specific weak-link nodes found anywhere in the chain. */
+  weak_links: Array<{ slug: string; title: string; level: string }>;
+}
+
+/**
+ * Walk every Integrated/Validated non-bedrock node and check whether its
+ * full reduction chain (all ancestors, not just direct parents) contains
+ * any Tentative/Hypothesis nodes.
+ *
+ * This catches the case where a parent was demoted after the child was
+ * already validated — the child's status is still Integrated/Validated
+ * but the epistemic ground beneath it has been pulled out.
+ *
+ * Returns one result per hollow node, listing every weak-link ancestor.
+ */
+export function findHollowChains(
+  nodes: Map<string, LatticeNode>,
+): HollowChainResult[] {
+  const results: HollowChainResult[] = [];
+
+  for (const node of nodes.values()) {
+    const isBedrock = node.level === "percept" || node.level === "axiom";
+    if (isBedrock) continue;
+    if (node.status !== "Integrated/Validated") continue;
+
+    // Walk full chain, collecting any Tentative ancestors
+    const weakLinks: Array<{ slug: string; title: string; level: string }> = [];
+    const visited = new Set<string>();
+    const stack = [...node.reduces_to];
+
+    while (stack.length > 0) {
+      const current = stack.pop()!;
+      if (visited.has(current)) continue;
+      visited.add(current);
+
+      const ancestor = nodes.get(current);
+      if (!ancestor) continue; // broken links are caught by validateGraph
+
+      if (ancestor.status === "Tentative/Hypothesis") {
+        weakLinks.push({
+          slug: ancestor.slug,
+          title: ancestor.title,
+          level: ancestor.level,
+        });
+      }
+
+      // Continue walking even past Tentative nodes — there may be more below
+      for (const parent of ancestor.reduces_to) {
+        stack.push(parent);
+      }
+    }
+
+    if (weakLinks.length > 0) {
+      results.push({
+        slug: node.slug,
+        title: node.title,
+        level: node.level,
+        weak_links: weakLinks,
+      });
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Find nodes that directly reduce to the given slug and are still Tentative/Hypothesis.
+ * Used to surface promotion hints after a node becomes Integrated/Validated.
+ */
+export function findTentativeChildren(
+  slug: string,
+  nodes: Map<string, LatticeNode>,
+): LatticeNode[] {
+  const results: LatticeNode[] = [];
+  for (const node of nodes.values()) {
+    if (
+      node.status === "Tentative/Hypothesis" &&
+      node.reduces_to.includes(slug)
+    ) {
+      results.push(node);
+    }
+  }
+  return results;
 }
 
 /**

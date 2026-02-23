@@ -223,12 +223,20 @@ export async function parseNodeFile(filePath: string): Promise<LatticeNode> {
   }
   const level = levelStr as Level;
 
-  // Validate status
-  const statusStr = String(frontmatter.status ?? "").trim();
-  if (!STATUSES.includes(statusStr as Status)) {
-    throw new InvalidStatusError(statusStr);
+  // Validate status.
+  // Bedrock nodes (axiom, percept) are always Integrated/Validated regardless
+  // of what is written on disk — their presence in the vault is their validation.
+  const isBedrock = level === "percept" || level === "axiom";
+  let status: Status;
+  if (isBedrock) {
+    status = "Integrated/Validated";
+  } else {
+    const statusStr = String(frontmatter.status ?? "").trim();
+    if (!STATUSES.includes(statusStr as Status)) {
+      throw new InvalidStatusError(statusStr);
+    }
+    status = statusStr as Status;
   }
-  const status = statusStr as Status;
 
   // Parse created timestamp from YAML (reliable across all platforms)
   let created: Date;

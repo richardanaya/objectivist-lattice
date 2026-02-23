@@ -29,7 +29,7 @@ lattice add --level percept \
   --title "Ball falls when dropped" \
   --proposition "Dropping a ball results in it falling every time."
 
-# Add a principle reducing to the axiom and percept
+# Add a principle reducing to the axiom and percept (starts Tentative)
 lattice add --level principle \
   --title "Causality is identity applied to action" \
   --proposition "Entities act according to their nature." \
@@ -37,7 +37,10 @@ lattice add --level principle \
   -r 202602221400-ball-falls-when-dropped \
   --tags "decisions,ethics"
 
-# Add an application reducing to the principle
+# Promote the principle once satisfied (parents are bedrock — already validated)
+lattice update causality-is-identity --status "Integrated/Validated"
+
+# Add an application reducing to the now-validated principle
 lattice add --level application \
   --title "Homework before games every day" \
   --proposition "Every school night finish homework before games." \
@@ -103,8 +106,10 @@ tags:
 
 - Axioms have no `reduces_to` links (philosophical bedrock — irreducible)
 - Percepts have no `reduces_to` links (empirical bedrock — irreducible)
+- Axioms and percepts are always `Integrated/Validated` — no status lifecycle. Their presence in the vault is their validation. `--status` is ignored for them on `add`; rejected on `update`.
 - Principles reduce to axioms and/or percepts
 - Applications reduce to principles (and/or axioms/percepts)
+- A principle or application cannot be promoted to `Integrated/Validated` unless all of its direct `reduces_to` parents are already `Integrated/Validated`. Promote bottom-up.
 - Cross-bedrock reduction (axiom → percept or percept → axiom) is rejected
 - Same-level reduction (principle → principle) is rejected
 - Upward reduction is rejected
@@ -129,6 +134,8 @@ Create vault structure at `--vault` path (default: `.`).
 
 Create one node. Required: `--level`, `--title`, `--proposition`. Optional: `-r` (repeatable), `--tags`, `--status`.
 
+`--status` is ignored for axiom/percept (always `Integrated/Validated`). For principles and applications, defaults to `Tentative/Hypothesis`. Cannot be set to `Integrated/Validated` if any parent is still `Tentative/Hypothesis`.
+
 ### `lattice query`
 
 Subcommands:
@@ -137,6 +144,11 @@ Subcommands:
 - `chain <node>` — full backward reduction tree
 - `tentative [--older-than <Nd>]` — stale Tentative nodes
 - `tag <tag>` — all nodes with tag, grouped by level
+- `hollow-chains` — validated nodes with a Tentative ancestor anywhere in their chain. Exit 1 if any found. Run alongside `validate` on every purge cycle.
+
+### `lattice update <node>`
+
+Modify an existing node's status, tags, or `reduces_to` links. Primary use: promoting a principle or application from `Tentative/Hypothesis` to `Integrated/Validated` once you are satisfied its chain is sound. Promotion is rejected if any direct parent is still `Tentative/Hypothesis`. Status changes are rejected for axiom/percept nodes.
 
 ### `lattice validate`
 
@@ -152,6 +164,56 @@ Subcommands:
 - `list` — print master tag list
 - `add <tag> --reason <node>` — add tag with justified reason
 - `remove <tag>` — remove unused tag
+
+## Purge Agent
+
+A purge agent is a cron job whose sole mandate is epistemic hygiene: surface weak nodes, delete obvious garbage, never make judgment calls.
+
+**Cadence: weekly.** The 14-day `--fix-auto` threshold is the binding constraint — running more often finds nothing new eligible for deletion. Run Sunday night so results are available for Monday review.
+
+```bash
+#!/usr/bin/env bash
+# purge-agent.sh
+
+set -euo pipefail
+VAULT="${LATTICE_VAULT:-.}"
+
+# 1. Structural integrity — stop and alert if exit 1
+lattice --vault "$VAULT" validate --json
+
+# 2. Hollow chains — validated nodes with a Tentative ancestor anywhere in their chain.
+#    'lattice validate' will NOT catch these: the chain is structurally intact
+#    but epistemically hollow (a parent was demoted after the child was validated).
+#    Output for human review: re-validate the weak link, or demote the hollow node.
+lattice --vault "$VAULT" query hollow-chains --json
+
+# 3. Stale tentatives approaching threshold — 7-day warning before 14-day auto-delete.
+#    Surface for review: ground them now or delete manually before they age out.
+lattice --vault "$VAULT" query tentative --older-than 7d --json
+
+# 4. Preview auto-deletion — always log before deleting
+lattice --vault "$VAULT" validate --fix-auto --dry-run --json
+
+# 5. Execute — only deletes Tentative + zero reduces_to + older than 14 days
+lattice --vault "$VAULT" validate --fix-auto --json
+```
+
+### What the purge agent does and does not do
+
+| Does | Does not |
+|------|----------|
+| Delete abandoned drafts (Tentative, no chain, >14d) | Demote validated nodes |
+| Surface hollow chains for review | Delete nodes with partial chains |
+| Surface stale tentatives approaching threshold | Promote anything |
+| Log a dry-run before every deletion | Skip the dry-run step |
+
+### hollow-chains vs validate
+
+`lattice validate` catches structural problems: broken links, cycles, missing `reduces_to`. It will **not** catch a validated node whose parent was demoted after promotion — the link exists, so structurally it looks fine.
+
+`lattice query hollow-chains` catches the epistemic problem: a node is marked `Integrated/Validated` but somewhere in its full ancestor chain there is a `Tentative/Hypothesis` node. Exit 1 if any found.
+
+Run both on every purge cycle.
 
 ## Global Options
 

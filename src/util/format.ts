@@ -201,7 +201,7 @@ function formatValidationTable(
   else lines.push(warn("rogue tag(s)", rogueTags.length));
 
   if (missingReductions.length === 0)
-    lines.push(ok("All non-percepts have reduction chains"));
+    lines.push(ok("All principles/applications have reduction chains"));
   else lines.push(warn("missing reduction chain(s)", missingReductions.length));
 
   if (staleTentatives.length === 0)
@@ -235,14 +235,30 @@ export function formatCreated(
   filePath: string,
   node: Record<string, unknown>,
   format: OutputFormat,
+  promotionHints?: Array<{ slug: string; title: string }>,
 ): string {
+  const result: Record<string, unknown> = { created: filePath, slug, node };
+  if (promotionHints && promotionHints.length > 0) {
+    result.promotion_hints = {
+      message:
+        "This node is now Integrated/Validated. The following nodes reduce to it and are still Tentative/Hypothesis — their chain may now be complete. Consider running 'lattice update <slug> --status Integrated/Validated' for each.",
+      nodes: promotionHints,
+    };
+  }
   switch (format) {
     case "json":
-      return JSON.stringify({ created: filePath, slug, node }, null, 2);
+      return JSON.stringify(result, null, 2);
     case "toon":
-      return encode({ created: filePath, slug, node });
-    case "table":
-      return `Node created: ${filePath}`;
+      return encode(result);
+    case "table": {
+      let out = `Node created: ${filePath}`;
+      if (promotionHints && promotionHints.length > 0) {
+        out +=
+          "\n\nNow validated — these nodes may be ready for promotion:\n" +
+          promotionHints.map((h) => `  ${h.slug}  "${h.title}"`).join("\n");
+      }
+      return out;
+    }
   }
 }
 
