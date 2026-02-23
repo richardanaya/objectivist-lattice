@@ -1,0 +1,37 @@
+{
+  "name": "objectivist-lattice",
+  "version": "1.0.0",
+  "description": "Objectivist Knowledge Lattice CLI — enforces percept > axiom > principle > application hierarchy on filesystem. Designed for LLM agents and rational humans.",
+  "type": "module",
+  "bin": {
+    "lattice": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch"
+  },
+  "keywords": [
+    "zettelkasten",
+    "knowledge-graph",
+    "cli",
+    "objectivism",
+    "epistemology",
+    "lattice",
+    "pkm",
+    "llm",
+    "toon"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@toon-format/toon": "^2.1.0",
+    "commander": "^13.1.0",
+    "yaml": "^2.7.1"
+  },
+  "devDependencies": {
+    "tsup": "^8.4.0",
+    "typescript": "^5.7.0"
+  }
+}
