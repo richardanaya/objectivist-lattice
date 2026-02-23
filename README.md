@@ -1,3 +1,6 @@
+<center><img width="400" alt="Objectivist Knowledge Lattice" src="https://github.com/user-attachments/assets/301246a2-4848-4f32-a957-5fca9457ac42" /></center>
+
+
 # Objectivist Knowledge Lattice
 
 A CLI that enforces axiom/percept → principle → application hierarchy on a filesystem of Markdown files. Zettelkasten corrected by reality. No floating abstractions allowed.
