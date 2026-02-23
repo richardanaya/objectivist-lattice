@@ -94,8 +94,7 @@ tags:
 ├── 02-Percepts/
 ├── 03-Principles/
 ├── 04-Applications/
-├── tags.json              # Machine-readable master tag list
-├── Tags.md                # Human-readable (auto-generated)
+├── tags.json              # Master tag list
 ├── Templates/New-Node.md  # Skeleton for Obsidian
 └── .lattice               # Vault marker
 ```

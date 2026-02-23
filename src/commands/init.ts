@@ -10,7 +10,7 @@ export function makeInitCommand(): Command {
   const cmd = new Command("init");
 
   cmd
-    .description("Create a new lattice vault (folders + tags.json + templates)")
+    .description("Create a new lattice vault (level folders, tags.json, templates)")
     .addHelpText(
       "after",
       `
@@ -24,12 +24,11 @@ WHAT THIS DOES:
 
   Created structure:
     <vault>/
-    ├── 01-Percepts/       Where observed facts go (level 0 — the base)
-    ├── 02-Axioms/         Where self-evident truths go (level 1)
-    ├── 03-Principles/     Where induced general rules go (level 2)
-    ├── 04-Applications/   Where concrete decisions go (level 3)
-    ├── tags.json          Master tag list (20 defaults, machine-readable)
-    ├── Tags.md            Same list, human-readable (auto-generated)
+    ├── 01-Axioms/         Philosophical bedrock — self-evident, irreducible
+    ├── 02-Percepts/       Empirical bedrock — directly observed facts
+    ├── 03-Principles/     Induced general rules
+    ├── 04-Applications/   Concrete decisions deduced from principles
+    ├── tags.json          Master tag list (20 defaults)
     ├── Templates/         Obsidian template skeleton
     └── .lattice           Marker file proving the vault is initialized
 

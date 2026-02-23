@@ -90,9 +90,6 @@ export const MAX_SLUG_LENGTH = 60;
 /** Name of the machine-readable tag master list file in the vault root. */
 export const TAGS_JSON_FILE = "tags.json";
 
-/** Name of the human-readable tag list (generated from tags.json). */
-export const TAGS_MD_FILE = "Tags.md";
-
 /** Templates folder name. */
 export const TEMPLATES_FOLDER = "Templates";
 

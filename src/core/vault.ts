@@ -44,7 +44,7 @@ export async function requireVault(vaultPath: string): Promise<void> {
 
 /**
  * Initialize a new lattice vault at the given path.
- * Creates: level folders, tags.json, Tags.md, Templates/New-Node.md, .lattice marker.
+ * Creates: level folders, tags.json, Templates/New-Node.md, .lattice marker.
  * Idempotent: creates only what is missing, never overwrites existing files.
  */
 export async function initializeVault(vaultPath: string): Promise<void> {
@@ -85,7 +85,7 @@ export async function initializeVault(vaultPath: string): Promise<void> {
     await writeFile(templatePath, templateContent, "utf-8");
   }
 
-  // Write tags.json + Tags.md (only if tags.json missing)
+  // Write tags.json (only if missing)
   const tagsJsonPath = join(vaultPath, "tags.json");
   if (!(await fileExists(tagsJsonPath))) {
     await saveTags(vaultPath, DEFAULT_TAGS);

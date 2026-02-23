@@ -119,7 +119,6 @@ VAULT STRUCTURE (created by 'lattice init'):
   ├── 03-Principles/        General rules induced from axioms and/or percepts
   ├── 04-Applications/      Concrete decisions deduced from principles
   ├── tags.json             Master tag list (machine-readable)
-  ├── Tags.md               Master tag list (human-readable, auto-generated)
   ├── Templates/New-Node.md Skeleton template for Obsidian users
   └── .lattice              Vault marker file
 

@@ -1,6 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { TAGS_JSON_FILE, TAGS_MD_FILE } from "./constants.js";
+import { TAGS_JSON_FILE } from "./constants.js";
 import { FilesystemError, RogueTagError } from "../util/errors.js";
 
 /**
@@ -29,30 +29,15 @@ export async function loadTags(vaultPath: string): Promise<string[]> {
 }
 
 /**
- * Save the master tag list to tags.json and regenerate Tags.md.
+ * Save the master tag list to tags.json.
  */
 export async function saveTags(
   vaultPath: string,
   tags: string[],
 ): Promise<void> {
   const sorted = [...new Set(tags.map((t) => t.toLowerCase().trim()))].sort();
-
-  // Write tags.json (machine-readable source of truth)
   const jsonPath = join(vaultPath, TAGS_JSON_FILE);
   await writeFile(jsonPath, JSON.stringify(sorted, null, 2) + "\n", "utf-8");
-
-  // Generate Tags.md (human-readable, for Obsidian browsing)
-  const mdPath = join(vaultPath, TAGS_MD_FILE);
-  const mdContent = [
-    "# Master Tag List",
-    "",
-    `> Auto-generated from ${TAGS_JSON_FILE}. Do not edit directly.`,
-    `> Use \`lattice tags add <tag> --reason <node>\` to add new tags.`,
-    "",
-    ...sorted.map((t) => `- ${t}`),
-    "",
-  ].join("\n");
-  await writeFile(mdPath, mdContent, "utf-8");
 }
 
 /**
