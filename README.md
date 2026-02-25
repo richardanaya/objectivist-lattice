@@ -56,6 +56,10 @@ lattice query chain homework-before-games --table
 
 # Validate the entire vault
 lattice validate
+
+# Check for duplicate principles (AI-assisted)
+lattice dedup candidates --level principle
+# Follow AI suggestions to group and merge duplicates
 ```
 
 ## What This Is
@@ -168,6 +172,129 @@ Subcommands:
 - `list` — print master tag list
 - `add <tag> --reason <node>` — add tag with justified reason
 - `remove <tag>` — remove unused tag
+
+## Deduplication
+
+Over time, multiple nodes may express the same objective truth with different wording or examples. The deduplication system helps identify and merge these duplicates while maintaining full audit trails and reversibility.
+
+### Workflow
+
+```bash
+# 1. Scan for potential duplicates at a level
+lattice dedup candidates --level principle --after 2024-01-01
+
+# 2. Copy the output to an AI (Claude, Grok) for duplicate analysis
+# AI suggests: lattice dedup group create --node slug1 --node slug2
+
+# 3. Create the suggested group
+lattice dedup group create --node principle-1 --node principle-2
+
+# 4. Review the group side-by-side
+lattice dedup group show DG-202401011230-123
+
+# 5. Merge if they are true duplicates
+lattice dedup merge --deduplication-group DG-202401011230-123 \
+  --title "Canonical principle title" \
+  --level principle \
+  --proposition "The combined objective truth..." \
+  --reason "Consolidating similar principles"
+
+# 6. Undo if you change your mind
+lattice dedup undo merged-node-slug --reason "Better consolidation possible"
+```
+
+### Commands
+
+#### `lattice dedup candidates --level <level> [--after <date>] [--max-candidates <N>]`
+
+Scan for potential semantic duplicates at one knowledge level. Outputs a markdown prompt designed for AI analysis to identify true duplicates.
+
+- `--level`: axiom | percept | principle | application
+- `--after`: ISO date (default: 1970-01-01) - only newer nodes
+- `--max-candidates`: Max nodes to include (default: 100)
+
+#### `lattice dedup group create --node <slug> [--node <slug> ...] [--dry-run]`
+
+Create a temporary group of potentially duplicate nodes. Groups get unique IDs like `DG-202401011230-456`.
+
+Validates that all nodes exist, are at the same level, and aren't already grouped.
+
+#### `lattice dedup group show <groupId>`
+
+Display comprehensive side-by-side comparison of all nodes in a group, including full propositions, metadata, and a ready-to-copy merge command.
+
+#### `lattice dedup group remove <groupId> [--dry-run]`
+
+Remove a deduplication group and clear group markers from all nodes. Safe to run on non-existent groups.
+
+#### `lattice dedup merge --title <title> --level <level> --proposition <text> [--deduplication-group <id> | --old-node <slug> ...] [--reason <text>] [--dry-run] [--auto-commit]`
+
+Merge duplicate nodes into a single canonical node.
+
+**What happens:**
+1. Creates new canonical node with provided content
+2. Moves old nodes to `99-Trash/` with audit trails
+3. Updates all `reduces_to` references across the vault
+4. Clears group markers
+5. Validates lattice integrity
+6. Optional git commit
+
+#### `lattice dedup undo <canonicalSlug> [--reason <text>] [--dry-run] [--auto-commit]`
+
+Completely reverse a merge operation.
+
+**What happens:**
+1. Moves canonical node to `99-Trash/Undone-Merges/`
+2. Restores all original nodes to original locations
+3. Rewrites references back to oldest restored node
+4. Validates lattice integrity
+
+### Safety Features
+
+- **Zero Data Loss**: All operations preserve full content and metadata
+- **Full Audit Trails**: Every change recorded in YAML frontmatter
+- **Complete Reversibility**: Every merge can be undone
+- **Automatic Validation**: Graph integrity checked after every operation
+- **Reference Rewriting**: Maintains DAG structure when nodes are merged/undone
+- **Trash Safety**: Deleted nodes remain readable in `99-Trash/` subfolders
+
+### Data Model Changes
+
+Deduplication adds these optional YAML fields:
+
+```yaml
+# On canonical nodes (after merge)
+merged_from:
+  - id: original-slug-1
+    original_path: /path/to/original/file.md
+    original_status: Tentative/Hypothesis
+    trashed_path: /path/to/trash/file.md
+merged_reason: Human reason for merge
+merged_date: 2024-01-01T12:00:00.000Z
+merged_group_id: DG-202401011200-123
+
+# On trashed nodes (after merge)
+deduplication_group: DG-202401011200-123  # Cleared after merge
+merged_into: canonical-slug
+trashed_on: 2024-01-01T12:00:00.000Z
+original_status: Tentative/Hypothesis
+original_path: /path/to/original/file.md
+
+# On undone canonical nodes
+undone_merge:
+  reason: Why it was undone
+```
+
+### Integration with Purge Agent
+
+The deduplication system integrates cleanly with the purge agent workflow. The `99-Trash/` folder contains subfolders for different types of operations:
+
+```
+99-Trash/
+├── regular-deletions/     # From lattice delete
+├── merged-nodes/          # From lattice dedup merge
+└── Undone-Merges/         # From lattice dedup undo
+```
 
 ## Memory Retrieval (`query related`)
 

@@ -53,7 +53,32 @@ async function gitCommitIfEnabled(vaultPath: string, message: string, enabled: b
 
 export function makeDedupCommand(): CommanderCommand {
   const dedup = new Command("dedup")
-    .description("Deduplication subsystem: discover, group, review, merge, undo");
+    .description(`Deduplication subsystem for managing semantic duplicates.
+
+WORKFLOW OVERVIEW:
+1. Find candidates: 'candidates' → AI analysis → 'group create'
+2. Review group: 'group show' → decide on merge
+3. Merge duplicates: 'merge' (creates canonical node, trashes old ones)
+4. Undo if needed: 'undo' (restores everything)
+
+This system maintains epistemological hygiene by ensuring each objective truth
+is represented exactly once, while preserving full audit trails and reversibility.
+
+EXAMPLES:
+  # AI-assisted deduplication
+  lattice dedup candidates --level principle
+  # Copy output to Claude/Grok, get group commands, then:
+  lattice dedup group show DG-202401011200-123
+  lattice dedup merge --deduplication-group DG-202401011200-123 \\
+    --title "Combined principle" --level principle --proposition "..."
+
+  # Manual deduplication
+  lattice dedup group create --node slug1 --node slug2
+  lattice dedup merge --old-node slug1 --old-node slug2 \\
+    --title "Merged" --level principle --proposition "..."
+
+  # Fix mistakes
+  lattice dedup undo merged-node-slug --reason "Wrong merge"`);
 
   dedup.addCommand(makeCandidatesCommand());
   dedup.addCommand(makeGroupCommand());
@@ -65,10 +90,34 @@ export function makeDedupCommand(): CommanderCommand {
 
 function makeCandidatesCommand(): CommanderCommand {
   const cmd = new Command("candidates")
-    .description("LLM-assisted scan for semantic duplicates at one level. Outputs markdown prompt for LLM judge.")
-    .requiredOption("--level <level>", "axiom | percept | principle | application")
-    .option("--after <date>", "ISO date (YYYY-MM-DD). Only newer nodes.", "1970-01-01")
-    .option("--max-candidates <N>", "Max nodes to include", "100");
+    .description(`Scan for potential semantic duplicates at one knowledge level.
+
+This command finds nodes that might express the same objective truth but with
+different wording or structure. It outputs a ready-to-copy markdown prompt
+designed for AI analysis (Claude, Grok, etc.) to help identify true duplicates.
+
+WHEN TO USE:
+- When you suspect duplicates exist at a level
+- For regular maintenance scans
+- Before major knowledge additions
+
+OUTPUT:
+- Markdown prompt containing all nodes at the specified level
+- Ready to paste into AI chat for duplicate analysis
+- AI will suggest 'lattice dedup group create' commands
+
+EXAMPLES:
+  # Scan recent principles for duplicates
+  lattice dedup candidates --level principle --after 2024-01-01
+
+  # Limit to 20 nodes for smaller AI prompts
+  lattice dedup candidates --level principle --max-candidates 20
+
+  # Full scan of all axioms
+  lattice dedup candidates --level axiom`)
+    .requiredOption("--level <level>", "Knowledge level: axiom | percept | principle | application")
+    .option("--after <date>", "ISO date (YYYY-MM-DD). Only scan nodes created after this date.", "1970-01-01")
+    .option("--max-candidates <N>", "Maximum nodes to include in scan (default: 100)", "100");
 
   cmd.action(async (opts) => {
     try {
@@ -120,7 +169,22 @@ function makeCandidatesCommand(): CommanderCommand {
 
 function makeGroupCommand(): CommanderCommand {
   const group = new Command("group")
-    .description("Manage temporary review groups");
+    .description(`Manage temporary deduplication review groups.
+
+Groups are temporary collections of potentially duplicate nodes. They exist
+only to facilitate review and merging - the actual deduplication happens
+in the merge command.
+
+WORKFLOW:
+1. Create group from AI suggestions or manual selection
+2. Review with 'show' command
+3. Either merge the group or remove it if not duplicates
+
+GROUPS ARE TEMPORARY:
+- Groups are just metadata markers on nodes
+- They don't affect the lattice structure
+- Removing a group doesn't delete nodes
+- Groups are cleared when nodes are merged`);
 
   group.addCommand(makeGroupCreateCommand());
   group.addCommand(makeGroupRemoveCommand());
@@ -131,9 +195,26 @@ function makeGroupCommand(): CommanderCommand {
 
 function makeGroupCreateCommand(): CommanderCommand {
   const cmd = new Command("create")
-    .description("Create a dedup group from node slugs")
-    .option("--dry-run", "Preview changes")
-    .requiredOption("--node <slug>", "Node slug. Repeat for multiple.", (v: string, p: string[]) => [...p, v as string], [] as string[]);
+    .description(`Create a temporary group of potentially duplicate nodes.
+
+This marks multiple nodes as belonging to the same deduplication group,
+allowing you to review them together before merging. Groups get unique
+IDs like DG-202401011230-456.
+
+VALIDATION PERFORMED:
+- All nodes must exist
+- All nodes must be at the same level
+- No node can be in another group already
+- At least one node required
+
+EXAMPLES:
+  # Group from AI suggestions
+  lattice dedup group create --node principle-1 --node principle-2
+
+  # Preview before creating
+  lattice dedup group create --dry-run --node slug1 --node slug2 --node slug3`)
+    .option("--dry-run", "Show what would be done without making changes")
+    .requiredOption("--node <slug>", "Node slug to include. Repeat for multiple nodes.", (v: string, p: string[]) => [...p, v as string], [] as string[]);
 
   cmd.action(async (opts) => {
     try {
@@ -197,8 +278,24 @@ function makeGroupCreateCommand(): CommanderCommand {
 
 function makeGroupRemoveCommand(): CommanderCommand {
   const cmd = new Command("remove")
-    .argument("<groupId>", "DG-YYYYMMDDHHMM-XXX")
-    .option("--dry-run", "Preview");
+    .description(`Remove a deduplication group and clear group markers from all nodes.
+
+This clears the deduplication_group field from every node that was in the
+specified group. It's safe to run on non-existent groups (silent success).
+
+WHEN TO USE:
+- When you decide grouped nodes aren't actually duplicates
+- To clean up abandoned groups
+- Before re-grouping nodes differently
+
+EXAMPLES:
+  # Remove a specific group
+  lattice dedup group remove DG-202401011230-456
+
+  # Preview removal
+  lattice dedup group remove DG-202401011230-456 --dry-run`)
+    .argument("<groupId>", "Group ID (format: DG-YYYYMMDDHHMM-XXX)")
+    .option("--dry-run", "Show what would be done without making changes");
 
   cmd.action(async (groupId, opts) => {
     try {
@@ -243,7 +340,28 @@ function makeGroupRemoveCommand(): CommanderCommand {
 
 function makeGroupShowCommand(): CommanderCommand {
   const cmd = new Command("show")
-    .argument("<groupId>", "DG-YYYYMMDDHHMM-XXX");
+    .description(`Display comprehensive review of a deduplication group.
+
+Shows all nodes in the group side-by-side with:
+- Full propositions for comparison
+- Creation dates, status, tags
+- Reduction chains
+- Ready-to-copy merge command
+
+WHEN TO USE:
+- After creating a group to review before merging
+- To compare similar nodes
+- To generate merge commands
+
+OUTPUT INCLUDES:
+- Group metadata (level, node count)
+- Side-by-side node details
+- Copy-paste merge command with all node slugs
+
+EXAMPLES:
+  # Review a group before merging
+  lattice dedup group show DG-202401011230-456`)
+    .argument("<groupId>", "Group ID (format: DG-YYYYMMDDHHMM-XXX)");
 
   cmd.action(async (groupId) => {
     try {
@@ -309,15 +427,53 @@ function makeGroupShowCommand(): CommanderCommand {
 
 function makeMergeCommand(): CommanderCommand {
   const cmd = new Command("merge")
-    .description("Merge group or old nodes into canonical")
-    .requiredOption("--title <title>")
-    .requiredOption("--level <level>")
-    .requiredOption("--proposition <text>")
-    .option("--deduplication-group <id>")
-    .option("--old-node <slug>", "Manual old node. Repeatable.", (v, p) => [...p, v as string], [] as string[])
-    .option("--reason <text>")
-    .option("--dry-run")
-    .option("--auto-commit", "Git commit if repo");
+    .description(`Merge duplicate nodes into a single canonical node.
+
+This is the core deduplication operation. It creates one new node representing
+the combined objective truth, moves old nodes to trash with full audit trails,
+and rewrites all references to point to the new canonical node.
+
+WHAT HAPPENS:
+1. Creates new canonical node with provided title/proposition
+2. Records merge metadata on canonical node (merged_from, merged_reason, etc.)
+3. Moves old nodes to 99-Trash/ with audit trails
+4. Updates all reduces_to references across the vault
+5. Clears deduplication_group markers
+6. Validates lattice integrity
+
+SAFETY FEATURES:
+- Full audit trail in YAML metadata
+- Zero data loss (trashed nodes remain readable)
+- Automatic reference rewriting
+- Validation after merge
+- Optional git commit
+
+WHEN TO USE:
+- After reviewing a group and confirming they are true duplicates
+- When you have the perfect combined proposition ready
+
+EXAMPLES:
+  # Merge a reviewed group
+  lattice dedup merge --deduplication-group DG-202401011230-456 \\
+    --title "Canonical principle title" --level principle \\
+    --proposition "The combined objective truth..."
+
+  # Manual merge of specific nodes
+  lattice dedup merge --old-node slug1 --old-node slug2 \\
+    --title "Merged title" --level principle --proposition "..." \\
+    --reason "Manual consolidation"
+
+  # Preview merge
+  lattice dedup merge --dry-run --deduplication-group GROUP-ID \\
+    --title "..." --level principle --proposition "..."`)
+    .requiredOption("--title <title>", "Title for the new canonical node")
+    .requiredOption("--level <level>", "Knowledge level (must match old nodes)")
+    .requiredOption("--proposition <text>", "Full propositional text for canonical node")
+    .option("--deduplication-group <id>", "Group ID to merge (alternative to --old-node)")
+    .option("--old-node <slug>", "Specific old node to merge. Repeat for multiple.", (v, p) => [...p, v as string], [] as string[])
+    .option("--reason <text>", "Human reason for this merge (recorded in metadata)")
+    .option("--dry-run", "Show what would be done without making changes")
+    .option("--auto-commit", "Automatically commit to git if vault is in repo");
 
   cmd.action(async (opts) => {
     try {
@@ -516,10 +672,44 @@ function makeMergeCommand(): CommanderCommand {
 
 function makeUndoCommand(): CommanderCommand {
   const cmd = new Command("undo")
-    .argument("<canonicalSlug>", "The merged node slug")
-    .option("--reason <text>", "Undo reason")
-    .option("--dry-run")
-    .option("--auto-commit");
+    .description(`Undo a merge operation and restore all original nodes.
+
+This completely reverses a merge, restoring the lattice to its pre-merge state.
+The canonical node is moved to 99-Trash/Undone-Merges/, and all original nodes
+are restored to their original locations with original metadata.
+
+WHAT HAPPENS:
+1. Validates the node was actually merged (has merged_from metadata)
+2. Moves canonical node to 99-Trash/Undone-Merges/ with undo reason
+3. Restores all trashed nodes to original paths
+4. Clears merge-related metadata from restored nodes
+5. Rewrites reduces_to references back to oldest restored node
+6. Validates lattice integrity
+
+SAFETY FEATURES:
+- Complete restoration of original state
+- Audit trail of undo operation
+- Reference rewriting to maintain DAG structure
+- Validation after undo
+
+WHEN TO USE:
+- When you realize a merge was incorrect
+- When better consolidation is possible
+- When original nodes had important distinctions
+
+EXAMPLES:
+  # Undo a specific merge
+  lattice dedup undo merged-node-slug --reason "Better consolidation possible"
+
+  # Preview undo
+  lattice dedup undo merged-node-slug --dry-run
+
+  # Undo with auto-commit
+  lattice dedup undo merged-node-slug --reason "Mistake" --auto-commit`)
+    .argument("<canonicalSlug>", "Slug of the merged canonical node to undo")
+    .option("--reason <text>", "Reason for undoing this merge")
+    .option("--dry-run", "Show what would be done without making changes")
+    .option("--auto-commit", "Automatically commit to git if vault is in repo");
 
   cmd.action(async (canonicalSlug, opts) => {
     try {
