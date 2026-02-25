@@ -12,8 +12,8 @@ const program = new Command();
 
 program
   .name("lattice")
-  .version("1.0.0")
-  .description("Objectivist Knowledge Lattice CLI v1.0")
+  .version("0.0.3")
+  .description("Objectivist Knowledge Lattice CLI v0.0.3")
   .option(
     "-v, --vault <path>",
     "Path to vault root (default: current directory)",
