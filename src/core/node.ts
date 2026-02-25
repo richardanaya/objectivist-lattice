@@ -20,6 +20,14 @@ import { EXIT } from "./constants.js";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
+/** Entry in merged_from array on canonical nodes. */
+export interface MergedFromEntry {
+  id: string;
+  original_path: string;
+  original_status: Status;
+  trashed_path: string;
+}
+
 /** Parsed representation of a lattice node. */
 export interface LatticeNode {
   /** Filename without .md extension — the canonical ID for this node. */
@@ -40,6 +48,26 @@ export interface LatticeNode {
   filePath: string;
   /** Node creation time (stored in YAML frontmatter, not filesystem). */
   created: Date;
+  /** Temporary deduplication group ID (DG-YYYYMMDDHHMM-XXX format). */
+  deduplication_group?: string;
+  /** If this node was merged, the slug of the new canonical node. */
+  merged_into?: string;
+  /** Timestamp when this node was trashed due to merge. */
+  trashed_on?: string;
+  /** Original status before merge (for restoration). */
+  original_status?: Status;
+  /** Original file path before move to trash. */
+  original_path?: string;
+  /** Structured list of nodes merged into this one. */
+  merged_from?: MergedFromEntry[];
+  /** Human reason for the merge (only on canonical nodes). */
+  merged_reason?: string;
+  /** Date of the merge. */
+  merged_date?: string;
+  /** Group ID used for the merge (only on canonical nodes). */
+  merged_group_id?: string;
+  /** If this canonical node was undone, flag and reason. */
+  undone_merge?: { reason?: string };
 }
 
 /**
@@ -53,6 +81,16 @@ interface NodeFrontmatter {
   status: string;
   tags: string | string[];
   created?: string;
+  deduplication_group?: string;
+  merged_into?: string;
+  trashed_on?: string;
+  original_status?: string;
+  original_path?: string;
+  merged_from?: MergedFromEntry[];
+  merged_reason?: string;
+  merged_date?: string;
+  merged_group_id?: string;
+  undone_merge?: { reason?: string };
 }
 
 // ─── Slug generation ─────────────────────────────────────────────────
@@ -258,6 +296,16 @@ export async function parseNodeFile(filePath: string): Promise<LatticeNode> {
     proposition,
     filePath,
     created,
+    deduplication_group: frontmatter.deduplication_group,
+    merged_into: frontmatter.merged_into,
+    trashed_on: frontmatter.trashed_on,
+    original_status: frontmatter.original_status as Status | undefined,
+    original_path: frontmatter.original_path,
+    merged_from: frontmatter.merged_from,
+    merged_reason: frontmatter.merged_reason,
+    merged_date: frontmatter.merged_date,
+    merged_group_id: frontmatter.merged_group_id,
+    undone_merge: frontmatter.undone_merge,
   };
 }
 
@@ -309,6 +357,10 @@ export interface CreateNodeOptions {
   status: Status;
   tags: string[];
   proposition: string;
+  merged_from?: MergedFromEntry[];
+  merged_reason?: string;
+  merged_date?: string;
+  merged_group_id?: string;
 }
 
 /**
@@ -321,6 +373,16 @@ interface NodeFrontmatterOnDisk {
   status: string;
   tags: string[];
   created: string;
+  deduplication_group?: string;
+  merged_into?: string;
+  trashed_on?: string;
+  original_status?: string;
+  original_path?: string;
+  merged_from?: MergedFromEntry[];
+  merged_reason?: string;
+  merged_date?: string;
+  merged_group_id?: string;
+  undone_merge?: { reason?: string };
 }
 
 /**
@@ -363,6 +425,10 @@ export async function createNodeFile(
     status: opts.status,
     tags: opts.tags,
     created: now.toISOString(),
+    merged_from: opts.merged_from,
+    merged_reason: opts.merged_reason,
+    merged_date: opts.merged_date,
+    merged_group_id: opts.merged_group_id,
   };
 
   const yamlStr = YAML.stringify(frontmatter, {
@@ -408,6 +474,16 @@ export async function updateNodeFile(
     tags?: string[];
     reduces_to?: string[];
     title?: string;
+    deduplication_group?: string;
+    merged_into?: string;
+    trashed_on?: string;
+    original_status?: Status;
+    original_path?: string;
+    merged_from?: MergedFromEntry[];
+    merged_reason?: string;
+    merged_date?: string;
+    merged_group_id?: string;
+    undone_merge?: { reason?: string };
   },
 ): Promise<void> {
   let raw: string;
@@ -443,6 +519,16 @@ export async function updateNodeFile(
   if (updates.tags !== undefined) frontmatter.tags = updates.tags;
   if (updates.reduces_to !== undefined) frontmatter.reduces_to = updates.reduces_to;
   if (updates.title !== undefined) frontmatter.title = updates.title;
+  if (updates.deduplication_group !== undefined) frontmatter.deduplication_group = updates.deduplication_group;
+  if (updates.merged_into !== undefined) frontmatter.merged_into = updates.merged_into;
+  if (updates.trashed_on !== undefined) frontmatter.trashed_on = updates.trashed_on;
+  if (updates.original_status !== undefined) frontmatter.original_status = updates.original_status;
+  if (updates.original_path !== undefined) frontmatter.original_path = updates.original_path;
+  if (updates.merged_from !== undefined) frontmatter.merged_from = updates.merged_from;
+  if (updates.merged_reason !== undefined) frontmatter.merged_reason = updates.merged_reason;
+  if (updates.merged_date !== undefined) frontmatter.merged_date = updates.merged_date;
+  if (updates.merged_group_id !== undefined) frontmatter.merged_group_id = updates.merged_group_id;
+  if (updates.undone_merge !== undefined) frontmatter.undone_merge = updates.undone_merge;
 
   const yamlStr = YAML.stringify(frontmatter, {
     lineWidth: 0,

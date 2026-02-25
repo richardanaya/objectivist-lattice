@@ -6,6 +6,7 @@ import { makeValidateCommand } from "./commands/validate.js";
 import { makeUpdateCommand } from "./commands/update.js";
 import { makeDeleteCommand } from "./commands/delete.js";
 import { makeTagsCommand } from "./commands/tags.js";
+import { makeDedupCommand } from "./commands/dedup.js";
 
 const program = new Command();
 
@@ -307,5 +308,6 @@ program.addCommand(makeQueryCommand());
 program.addCommand(makeValidateCommand());
 program.addCommand(makeDeleteCommand());
 program.addCommand(makeTagsCommand());
+program.addCommand(makeDedupCommand());
 
 program.parse();
